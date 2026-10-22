@@ -50,11 +50,11 @@ class MainActivity : Activity() {
             runOnUiThread {
                 tunnelUp = newState == State.UP
                 status.text = if (tunnelUp) {
-                    "WireGuard tunnel: connected\nChecking external HTTPS…\nRecovery engine: prototype"
+                    "VPN tunnel: connected\nChecking external HTTPS…\nRecovery engine: prototype"
                 } else {
-                    "WireGuard tunnel: disconnected\nRecovery engine: prototype"
+                    "VPN tunnel: disconnected\nRecovery engine: prototype"
                 }
-                connectButton.text = if (tunnelUp) "Disconnect VPN" else "Connect WireGuard VPN"
+                connectButton.text = if (tunnelUp) "Disconnect VPN" else "Connect VPN"
             }
         }
         override fun isIpv4ResolutionPreferred(): Boolean = true
@@ -69,7 +69,7 @@ class MainActivity : Activity() {
             gravity = Gravity.CENTER
         }
         status = TextView(this).apply {
-            text = "Development build\nWireGuard tunnel: not connected\nRecovery engine: prototype"
+            text = "Development build\nVPN tunnel: not connected\nRecovery engine: prototype"
             textSize = 16f
             gravity = Gravity.CENTER
             setPadding(16, 16, 16, 16)
@@ -89,7 +89,7 @@ class MainActivity : Activity() {
             setOnClickListener { chooseVpnProfile() }
         }
         connectButton = Button(this).apply {
-            text = "Connect WireGuard VPN"
+            text = "Connect VPN"
             isEnabled = false
             setOnClickListener { connectOrDisconnect() }
         }
@@ -98,7 +98,7 @@ class MainActivity : Activity() {
             setPadding(12, 12, 12, 12)
         }
         val help = TextView(this).apply {
-            text = "WireGuard profiles can be connected with Android VPN permission. OpenVPN files can be previewed but require a separate OpenVPN engine. Server addresses are candidate hints only; an address by itself is not enough to connect. After starting a tunnel, MATRIX checks whether an external HTTPS request succeeds."
+            text = "WireGuard and AmneziaWG profiles, including compatible configs from the WARP generator, can be connected with Android VPN permission. OpenVPN files can be previewed but require a separate OpenVPN engine. Server addresses are candidate hints only; an address by itself is not enough to connect. After starting a tunnel, MATRIX checks whether an external HTTPS request succeeds."
             textSize = 13f
             gravity = Gravity.CENTER
             setPadding(8, 12, 8, 12)
@@ -198,7 +198,7 @@ class MainActivity : Activity() {
                 try {
                     wireGuardBackend.setState(matrixTunnel, State.DOWN, null)
                     runOnUiThread {
-                        status.text = "WireGuard tunnel: disconnected"
+                        status.text = "VPN tunnel: disconnected"
                         connectButton.isEnabled = true
                     }
                 } catch (e: Exception) {
@@ -211,7 +211,7 @@ class MainActivity : Activity() {
             return
         }
         if (wireGuardConfig == null) {
-            showError("No WireGuard profile", "Import and validate a WireGuard .conf file first.")
+            showError("No VPN profile", "Import and validate a WireGuard or AmneziaWG .conf file first.")
             return
         }
         val prepareIntent = VpnService.prepare(this)
@@ -221,7 +221,7 @@ class MainActivity : Activity() {
 
     private fun startWireGuardTunnel() {
         val config = wireGuardConfig ?: return
-        status.text = "Starting WireGuard tunnel…"
+        status.text = "Starting VPN tunnel…"
         connectButton.isEnabled = false
         Thread {
             try {
@@ -229,12 +229,12 @@ class MainActivity : Activity() {
                 val probe = TunnelConnectivityProbe.check()
                 runOnUiThread {
                     status.text = if (probe.reachable) {
-                        "WireGuard tunnel: active\n${probe.message}\nPeer handshake is not independently confirmed."
+                        "VPN tunnel: active\n${probe.message}\nPeer handshake is not independently confirmed."
                     } else {
-                        "WireGuard tunnel: started, but internet check failed.\n${probe.message}\nThe server may be unreachable or the profile may not route internet traffic."
+                        "VPN tunnel: started, but internet check failed.\n${probe.message}\nThe server may be unreachable or the profile may not route internet traffic."
                     }
                     connectButton.isEnabled = true
-                    connectButton.text = if (tunnelUp) "Disconnect VPN" else "Connect WireGuard VPN"
+                    connectButton.text = if (tunnelUp) "Disconnect VPN" else "Connect VPN"
                 }
             } catch (e: Exception) {
                 runOnUiThread {
