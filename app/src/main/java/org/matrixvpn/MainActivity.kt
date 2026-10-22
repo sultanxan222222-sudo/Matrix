@@ -11,13 +11,16 @@ import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.TextView
+import org.matrixvpn.network.NetworkWatcher
 import org.matrixvpn.profile.ImportedVpnProfile
 import org.matrixvpn.profile.VpnEndpoint
 import org.matrixvpn.profile.VpnProfileInspector
 
 class MainActivity : Activity() {
     private lateinit var status: TextView
+    private lateinit var networkStatus: TextView
     private lateinit var endpointList: TextView
+    private lateinit var networkWatcher: NetworkWatcher
     private val pickProfileRequest = 4102
     private val preferences by lazy { getSharedPreferences("matrix_endpoints", MODE_PRIVATE) }
 
@@ -30,10 +33,16 @@ class MainActivity : Activity() {
             gravity = Gravity.CENTER
         }
         status = TextView(this).apply {
-            text = "Development build\n\nRecovery engine: prototype\nVPN tunnel: not connected\n\nTraffic is not routed through a VPN in this build."
+            text = "Development build\nRecovery engine: prototype\nVPN tunnel: not connected"
             textSize = 16f
             gravity = Gravity.CENTER
-            setPadding(16, 20, 16, 20)
+            setPadding(16, 16, 16, 16)
+        }
+        networkStatus = TextView(this).apply {
+            text = "Network: checking…"
+            textSize = 14f
+            gravity = Gravity.CENTER
+            setPadding(8, 8, 8, 8)
         }
         val addEndpointButton = Button(this).apply {
             text = "Add VPN server address"
@@ -60,12 +69,26 @@ class MainActivity : Activity() {
             setPadding(20, 20, 20, 20)
             addView(title)
             addView(status)
+            addView(networkStatus)
             addView(addEndpointButton, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
             addView(endpointList)
             addView(importButton, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
             addView(help)
         })
+        networkWatcher = NetworkWatcher(this) { state ->
+            runOnUiThread { networkStatus.text = state.summary() }
+        }
         refreshEndpointList()
+    }
+
+    override fun onStart() {
+        super.onStart()
+        networkWatcher.start()
+    }
+
+    override fun onStop() {
+        networkWatcher.stop()
+        super.onStop()
     }
 
     private fun showAddEndpointDialog() {
