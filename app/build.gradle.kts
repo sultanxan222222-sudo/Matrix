@@ -4,7 +4,7 @@ plugins {
 }
 android {
     namespace = "org.matrixvpn"
-    compileSdk = 35
+    compileSdk = 36
     defaultConfig {
         applicationId = "org.matrixvpn"
         minSdk = 26
