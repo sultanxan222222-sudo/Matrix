@@ -6,15 +6,20 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import android.view.Gravity
+import android.view.ViewGroup
 import android.widget.Button
+import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.TextView
 import org.matrixvpn.profile.ImportedVpnProfile
+import org.matrixvpn.profile.VpnEndpoint
 import org.matrixvpn.profile.VpnProfileInspector
 
 class MainActivity : Activity() {
     private lateinit var status: TextView
+    private lateinit var endpointList: TextView
     private val pickProfileRequest = 4102
+    private val preferences by lazy { getSharedPreferences("matrix_endpoints", MODE_PRIVATE) }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -28,14 +33,22 @@ class MainActivity : Activity() {
             text = "Development build\n\nRecovery engine: prototype\nVPN tunnel: not connected\n\nTraffic is not routed through a VPN in this build."
             textSize = 16f
             gravity = Gravity.CENTER
-            setPadding(24, 24, 24, 24)
+            setPadding(16, 20, 16, 20)
+        }
+        val addEndpointButton = Button(this).apply {
+            text = "Add VPN server address"
+            setOnClickListener { showAddEndpointDialog() }
         }
         val importButton = Button(this).apply {
             text = "Import existing VPN profile"
             setOnClickListener { chooseVpnProfile() }
         }
+        endpointList = TextView(this).apply {
+            textSize = 14f
+            setPadding(12, 12, 12, 12)
+        }
         val help = TextView(this).apply {
-            text = "Supports profile preview for WireGuard (.conf) and OpenVPN (.ovpn). A server address alone is not a complete VPN profile."
+            text = "Server addresses are saved locally as candidate hints. An address alone cannot authenticate or establish a VPN connection. WireGuard/OpenVPN profile import is preview-only until a tunnel engine is integrated."
             textSize = 13f
             gravity = Gravity.CENTER
             setPadding(8, 12, 8, 12)
@@ -44,12 +57,68 @@ class MainActivity : Activity() {
         setContentView(LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
-            setPadding(24, 24, 24, 24)
+            setPadding(20, 20, 20, 20)
             addView(title)
             addView(status)
-            addView(importButton)
+            addView(addEndpointButton, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+            addView(endpointList)
+            addView(importButton, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
             addView(help)
         })
+        refreshEndpointList()
+    }
+
+    private fun showAddEndpointDialog() {
+        val input = EditText(this).apply {
+            hint = "vpn.example.net:51820"
+            singleLine = true
+            setPadding(32, 24, 32, 24)
+        }
+        AlertDialog.Builder(this)
+            .setTitle("Add VPN server address")
+            .setMessage("Enter host:port. This saves the address as a candidate only; it does not connect or test the server.")
+            .setView(input)
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Save") { _, _ ->
+                try {
+                    val endpoint = VpnEndpoint.parse(input.text.toString())
+                    val entries = preferences.getStringSet("addresses", emptySet()).orEmpty().toMutableSet()
+                    entries.add(endpoint.displayAddress)
+                    preferences.edit().putStringSet("addresses", entries).apply()
+                    refreshEndpointList()
+                } catch (e: IllegalArgumentException) {
+                    AlertDialog.Builder(this)
+                        .setTitle("Address not accepted")
+                        .setMessage(e.message ?: "Check the host and port.")
+                        .setPositiveButton("OK", null)
+                        .show()
+                }
+            }
+            .show()
+    }
+
+    private fun refreshEndpointList() {
+        val entries = preferences.getStringSet("addresses", emptySet()).orEmpty().toList().sorted()
+        endpointList.text = if (entries.isEmpty()) {
+            "Saved server candidates: none"
+        } else {
+            "Saved server candidates (tap and hold one to remove):\n" + entries.joinToString("\n")
+        }
+        endpointList.setOnLongClickListener {
+            if (entries.isEmpty()) return@setOnLongClickListener false
+            val labels = entries.toTypedArray()
+            AlertDialog.Builder(this)
+                .setTitle("Remove saved address")
+                .setItems(labels) { _, which ->
+                    val updated = preferences.getStringSet("addresses", emptySet()).orEmpty().toMutableSet()
+                    updated.remove(labels[which])
+                    preferences.edit().putStringSet("addresses", updated).apply()
+                    refreshEndpointList()
+                }
+                .setNegativeButton("Cancel", null)
+                .show()
+            true
+        }
     }
 
     private fun chooseVpnProfile() {
