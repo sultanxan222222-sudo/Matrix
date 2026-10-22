@@ -25,17 +25,16 @@ object VpnProfileInspector {
         val hasPeer = lines.any { it.equals("[Peer]", ignoreCase = true) }
         val isWireGuard = hasInterface && hasPeer
         val awgKeys = setOf(
-            "Jc", "Jmin", "Jmax", "S1", "S2", "S3", "S4",
-            "H1", "H2", "H3", "H4", "I1", "I2", "I3", "I4", "I5",
-            "J1", "J2", "J3", "H1", "H2", "H3", "H4",
-            "I1", "I2", "I3", "I4", "I5", "S1", "S2", "S3", "S4"
+            "jc", "jmin", "jmax", "s1", "s2", "s3", "s4",
+            "h1", "h2", "h3", "h4", "i1", "i2", "i3", "i4", "i5",
+            "j1", "j2", "contentpaddingaddition", "maxhandshakeattempts",
+            "keepalivetimeout", "rejectaftertime", "rekeyaftertime",
+            "rekeytimeout", "randomtrailers", "disablecookies",
+            "headerprotectionkey", "randomizedpacketcorruption"
         )
         val hasAwgExtensions = lines.any { line ->
-            val key = line.substringBefore('=').trim()
-            key in awgKeys || key.equals("HeaderProtectionKey", ignoreCase = true) ||
-                key.equals("RandomizedPacketCorruption", ignoreCase = true) ||
-                key.equals("RandomTrailers", ignoreCase = true) ||
-                key.equals("DisableCookies", ignoreCase = true)
+            val key = line.substringBefore('=').trim().lowercase()
+            key in awgKeys
         }
         val isOpenVpn = lines.any {
             it.startsWith("client", ignoreCase = true) ||
