@@ -55,6 +55,24 @@ class VpnProfileInspectorTest {
         assertTrue(result.hasInlineCredentials)
     }
 
+    @Test fun detectsAwg30GeneratorFieldsWithoutLegacyObfuscationKeys() {
+        val profile = """
+            [Interface]
+            PrivateKey = EXAMPLE_PRIVATE_KEY
+            Address = 10.0.0.2/32
+            ContentPaddingAddition = 8
+            MaxHandshakeAttempts = 5
+            KeepaliveTimeout = 30
+            [Peer]
+            PublicKey = EXAMPLE_PUBLIC_KEY
+            Endpoint = vpn.example.net:2408
+            AllowedIPs = 0.0.0.0/0
+        """.trimIndent()
+
+        val result = VpnProfileInspector.inspect(profile)
+        assertEquals(ImportedVpnProfile.Format.AMNEZIAWG, result.format)
+    }
+
     @Test fun detectsOpenVpnRemote() {
         val profile = """
             client
