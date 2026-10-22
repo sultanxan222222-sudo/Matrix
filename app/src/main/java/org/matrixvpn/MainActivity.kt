@@ -88,6 +88,10 @@ class MainActivity : Activity() {
             text = "Import VPN profile"
             setOnClickListener { chooseVpnProfile() }
         }
+        val pasteButton = Button(this).apply {
+            text = "Paste WARP / VPN configuration"
+            setOnClickListener { showPasteProfileDialog() }
+        }
         connectButton = Button(this).apply {
             text = "Connect VPN"
             isEnabled = false
@@ -113,6 +117,7 @@ class MainActivity : Activity() {
             addView(addEndpointButton, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
             addView(endpointList)
             addView(importButton, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+            addView(pasteButton, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
             addView(connectButton, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
             addView(help)
         })
@@ -183,12 +188,49 @@ class MainActivity : Activity() {
     }
 
     private fun chooseVpnProfile() {
-        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+        // Storage Access Framework works across Android 13–16 without broad storage permissions.
+        // Keep the picker MIME filter unrestricted: some OEM document providers hide .conf files
+        // when EXTRA_MIME_TYPES contains non-standard WireGuard/OpenVPN MIME types.
+        val documentIntent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
             addCategory(Intent.CATEGORY_OPENABLE)
             type = "*/*"
-            putExtra(Intent.EXTRA_MIME_TYPES, arrayOf("text/plain", "application/octet-stream", "application/x-wireguard-profile", "application/x-openvpn-profile"))
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
-        startActivityForResult(intent, pickProfileRequest)
+        try {
+            startActivityForResult(documentIntent, pickProfileRequest)
+        } catch (_: android.content.ActivityNotFoundException) {
+            // Compatibility fallback for devices without a working ACTION_OPEN_DOCUMENT provider.
+            val contentIntent = Intent(Intent.ACTION_GET_CONTENT).apply {
+                addCategory(Intent.CATEGORY_OPENABLE)
+                type = "*/*"
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            try {
+                startActivityForResult(Intent.createChooser(contentIntent, "Select VPN configuration"), pickProfileRequest)
+            } catch (e: Exception) {
+                showError("File picker unavailable", "This phone does not provide a file picker. Use “Paste WARP / VPN configuration” and paste the full configuration text. Details: ${e.message ?: "unknown error"}")
+            }
+        } catch (e: Exception) {
+            showError("Could not open files", "Try the paste option and insert the full WARP/WireGuard configuration text. Details: ${e.message ?: "unknown error"}")
+        }
+    }
+
+    private fun showPasteProfileDialog() {
+        val input = EditText(this).apply {
+            hint = "[Interface]\\nPrivateKey = …\\nAddress = …\\n\\n[Peer]\\nPublicKey = …\\nEndpoint = host:port"
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+            minLines = 8
+            maxLines = 16
+            gravity = Gravity.TOP or Gravity.START
+            setPadding(24, 20, 24, 20)
+        }
+        AlertDialog.Builder(this)
+            .setTitle("Paste WARP / VPN configuration")
+            .setMessage("Open the WARP generator, copy the complete WireGuard/AmneziaWG configuration, then paste it here. Do not paste a folder path or a server address alone.")
+            .setView(input)
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Validate") { _, _ -> processProfileText(input.text.toString()) }
+            .show()
     }
 
     private fun connectOrDisconnect() {
@@ -262,6 +304,15 @@ class MainActivity : Activity() {
         try {
             val profileText = contentResolver.openInputStream(uri)?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }
                 ?: throw IllegalArgumentException("Could not read the selected file.")
+            processProfileText(profileText)
+        } catch (e: Exception) {
+            showError("Could not read VPN profile", e.message ?: "The selected file could not be inspected.")
+        }
+    }
+
+    private fun processProfileText(profileText: String) {
+        try {
+            require(profileText.isNotBlank()) { "Configuration is empty. Paste or select the complete .conf file." }
             require(profileText.length <= 2_000_000) { "The selected profile is too large to import safely." }
             val profile = VpnProfileInspector.inspect(profileText)
             val formatLabel = when (profile.format) {
@@ -295,7 +346,7 @@ class MainActivity : Activity() {
             else "Profile inspected: $formatLabel\nVPN tunnel: disconnected"
             AlertDialog.Builder(this).setTitle("VPN profile processed").setMessage(details).setPositiveButton("OK", null).show()
         } catch (e: Exception) {
-            showError("Could not read VPN profile", e.message ?: "The selected file could not be inspected.")
+            showError("Could not process VPN profile", e.message ?: "The configuration could not be inspected.")
         }
     }
 }
