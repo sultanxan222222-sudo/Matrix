@@ -258,6 +258,7 @@ class MainActivity : Activity() {
             val profile = VpnProfileInspector.inspect(profileText)
             val formatLabel = when (profile.format) {
                 ImportedVpnProfile.Format.WIREGUARD -> "WireGuard"
+                ImportedVpnProfile.Format.AMNEZIAWG -> "AmneziaWG (AWG)"
                 ImportedVpnProfile.Format.OPENVPN -> "OpenVPN"
                 ImportedVpnProfile.Format.UNKNOWN -> "Unknown profile format"
             }
@@ -276,9 +277,10 @@ class MainActivity : Activity() {
                 if (profile.peerCount > 0) append("Peers: ").append(profile.peerCount).append("\n")
                 append("Endpoint hints:\n").append(endpointText).append("\n\n")
                 if (profile.hasInlineCredentials) append("This profile contains private keys or credentials. Keep it private.\n\n")
-                if (wireGuardConfig != null) append("WireGuard configuration validated. You can now request Android VPN permission and connect.")
+                if (wireGuardConfig != null && profile.format == ImportedVpnProfile.Format.AMNEZIAWG) append("AmneziaWG profile accepted by the integrated AWG-capable tunnel library. You can request Android VPN permission and connect.")
+                else if (wireGuardConfig != null) append("WireGuard configuration validated. You can now request Android VPN permission and connect.")
                 else if (profile.format == ImportedVpnProfile.Format.OPENVPN) append("OpenVPN profile recognized, but the OpenVPN engine is not integrated yet.")
-                else append("No supported, valid WireGuard configuration was loaded.")
+                else append("No supported, valid WireGuard/AmneziaWG configuration was loaded.")
                 append("\n\nProfile contents are kept in memory only by this build; they are not saved by MATRIX.")
             }
             status.text = if (wireGuardConfig != null) "WireGuard profile ready\nVPN tunnel: disconnected"
