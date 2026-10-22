@@ -13,10 +13,10 @@ import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.TextView
-import com.wireguard.android.backend.GoBackend
-import com.wireguard.android.backend.Tunnel
-import com.wireguard.android.backend.Tunnel.State
-import com.wireguard.config.Config
+import org.amnezia.awg.backend.GoBackend
+import org.amnezia.awg.backend.Tunnel
+import org.amnezia.awg.backend.Tunnel.State
+import org.amnezia.awg.config.Config
 import org.matrixvpn.network.NetworkWatcher
 import org.matrixvpn.network.TunnelConnectivityProbe
 import org.matrixvpn.profile.ImportedVpnProfile
