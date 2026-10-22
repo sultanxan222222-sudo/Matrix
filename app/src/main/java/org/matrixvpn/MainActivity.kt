@@ -18,6 +18,7 @@ import com.wireguard.android.backend.Tunnel
 import com.wireguard.android.backend.Tunnel.State
 import com.wireguard.config.Config
 import org.matrixvpn.network.NetworkWatcher
+import org.matrixvpn.network.TunnelConnectivityProbe
 import org.matrixvpn.profile.ImportedVpnProfile
 import org.matrixvpn.profile.VpnEndpoint
 import org.matrixvpn.profile.VpnProfileInspector
@@ -43,7 +44,7 @@ class MainActivity : Activity() {
             runOnUiThread {
                 tunnelUp = newState == State.UP
                 status.text = if (tunnelUp) {
-                    "WireGuard tunnel: connected\nRecovery engine: prototype"
+                    "WireGuard tunnel: connected\nChecking external HTTPS…\nRecovery engine: prototype"
                 } else {
                     "WireGuard tunnel: disconnected\nRecovery engine: prototype"
                 }
@@ -54,7 +55,6 @@ class MainActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-
         val title = TextView(this).apply {
             text = "MATRIX VPN"
             textSize = 28f
@@ -90,12 +90,11 @@ class MainActivity : Activity() {
             setPadding(12, 12, 12, 12)
         }
         val help = TextView(this).apply {
-            text = "WireGuard profiles can be connected with Android VPN permission. OpenVPN files can be previewed but require a separate OpenVPN engine. Server addresses are candidate hints only; an address by itself is not enough to connect."
+            text = "WireGuard profiles can be connected with Android VPN permission. OpenVPN files can be previewed but require a separate OpenVPN engine. Server addresses are candidate hints only; an address by itself is not enough to connect. After starting a tunnel, MATRIX checks whether an external HTTPS request succeeds."
             textSize = 13f
             gravity = Gravity.CENTER
             setPadding(8, 12, 8, 12)
         }
-
         setContentView(LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
@@ -156,11 +155,8 @@ class MainActivity : Activity() {
 
     private fun refreshEndpointList() {
         val entries = preferences.getStringSet("addresses", emptySet()).orEmpty().toList().sorted()
-        endpointList.text = if (entries.isEmpty()) {
-            "Saved server candidates: none"
-        } else {
-            "Saved server candidates (tap and hold to remove):\n" + entries.joinToString("\n")
-        }
+        endpointList.text = if (entries.isEmpty()) "Saved server candidates: none"
+        else "Saved server candidates (tap and hold to remove):\n" + entries.joinToString("\n")
         endpointList.setOnLongClickListener {
             if (entries.isEmpty()) return@setOnLongClickListener false
             val labels = entries.toTypedArray()
@@ -182,24 +178,26 @@ class MainActivity : Activity() {
         val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
             addCategory(Intent.CATEGORY_OPENABLE)
             type = "*/*"
-            putExtra(Intent.EXTRA_MIME_TYPES, arrayOf(
-                "text/plain",
-                "application/octet-stream",
-                "application/x-wireguard-profile",
-                "application/x-openvpn-profile"
-            ))
+            putExtra(Intent.EXTRA_MIME_TYPES, arrayOf("text/plain", "application/octet-stream", "application/x-wireguard-profile", "application/x-openvpn-profile"))
         }
         startActivityForResult(intent, pickProfileRequest)
     }
 
     private fun connectOrDisconnect() {
         if (tunnelUp) {
+            connectButton.isEnabled = false
             Thread {
                 try {
                     wireGuardBackend.setState(matrixTunnel, State.DOWN, null)
-                    runOnUiThread { status.text = "WireGuard tunnel: disconnected" }
+                    runOnUiThread {
+                        status.text = "WireGuard tunnel: disconnected"
+                        connectButton.isEnabled = true
+                    }
                 } catch (e: Exception) {
-                    runOnUiThread { showError("Disconnect failed", e.message ?: "Could not stop the tunnel.") }
+                    runOnUiThread {
+                        connectButton.isEnabled = true
+                        showError("Disconnect failed", e.message ?: "Could not stop the tunnel.")
+                    }
                 }
             }.start()
             return
@@ -209,11 +207,8 @@ class MainActivity : Activity() {
             return
         }
         val prepareIntent = VpnService.prepare(this)
-        if (prepareIntent != null) {
-            startActivityForResult(prepareIntent, vpnPermissionRequest)
-        } else {
-            startWireGuardTunnel()
-        }
+        if (prepareIntent != null) startActivityForResult(prepareIntent, vpnPermissionRequest)
+        else startWireGuardTunnel()
     }
 
     private fun startWireGuardTunnel() {
@@ -223,9 +218,15 @@ class MainActivity : Activity() {
         Thread {
             try {
                 wireGuardBackend.setState(matrixTunnel, State.UP, config)
+                val probe = TunnelConnectivityProbe.check()
                 runOnUiThread {
-                    status.text = "WireGuard tunnel started. Waiting for peer traffic/handshake."
+                    status.text = if (probe.reachable) {
+                        "WireGuard tunnel: active\n${probe.message}\nPeer handshake is not independently confirmed."
+                    } else {
+                        "WireGuard tunnel: started, but internet check failed.\n${probe.message}\nThe server may be unreachable or the profile may not route internet traffic."
+                    }
                     connectButton.isEnabled = true
+                    connectButton.text = if (tunnelUp) "Disconnect VPN" else "Connect WireGuard VPN"
                 }
             } catch (e: Exception) {
                 runOnUiThread {
@@ -251,11 +252,9 @@ class MainActivity : Activity() {
         if (requestCode != pickProfileRequest || resultCode != RESULT_OK) return
         val uri: Uri = data?.data ?: return
         try {
-            val profileText = contentResolver.openInputStream(uri)?.bufferedReader(Charsets.UTF_8)?.use {
-                it.readText()
-            } ?: throw IllegalArgumentException("Could not read the selected file.")
+            val profileText = contentResolver.openInputStream(uri)?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }
+                ?: throw IllegalArgumentException("Could not read the selected file.")
             require(profileText.length <= 2_000_000) { "The selected profile is too large to import safely." }
-
             val profile = VpnProfileInspector.inspect(profileText)
             val formatLabel = when (profile.format) {
                 ImportedVpnProfile.Format.WIREGUARD -> "WireGuard"
@@ -271,29 +270,20 @@ class MainActivity : Activity() {
                 }
             }
             connectButton.isEnabled = wireGuardConfig != null
-            val endpointText = if (profile.endpointHints.isEmpty()) "No endpoint address detected"
-                else profile.endpointHints.joinToString("\n")
+            val endpointText = if (profile.endpointHints.isEmpty()) "No endpoint address detected" else profile.endpointHints.joinToString("\n")
             val details = buildString {
                 append("Detected format: ").append(formatLabel).append("\n")
                 if (profile.peerCount > 0) append("Peers: ").append(profile.peerCount).append("\n")
                 append("Endpoint hints:\n").append(endpointText).append("\n\n")
                 if (profile.hasInlineCredentials) append("This profile contains private keys or credentials. Keep it private.\n\n")
-                if (wireGuardConfig != null) {
-                    append("WireGuard configuration validated. You can now request Android VPN permission and connect.")
-                } else if (profile.format == ImportedVpnProfile.Format.OPENVPN) {
-                    append("OpenVPN profile recognized, but the OpenVPN engine is not integrated yet.")
-                } else {
-                    append("No supported, valid WireGuard configuration was loaded.")
-                }
+                if (wireGuardConfig != null) append("WireGuard configuration validated. You can now request Android VPN permission and connect.")
+                else if (profile.format == ImportedVpnProfile.Format.OPENVPN) append("OpenVPN profile recognized, but the OpenVPN engine is not integrated yet.")
+                else append("No supported, valid WireGuard configuration was loaded.")
                 append("\n\nProfile contents are kept in memory only by this build; they are not saved by MATRIX.")
             }
             status.text = if (wireGuardConfig != null) "WireGuard profile ready\nVPN tunnel: disconnected"
-                else "Profile inspected: $formatLabel\nVPN tunnel: disconnected"
-            AlertDialog.Builder(this)
-                .setTitle("VPN profile processed")
-                .setMessage(details)
-                .setPositiveButton("OK", null)
-                .show()
+            else "Profile inspected: $formatLabel\nVPN tunnel: disconnected"
+            AlertDialog.Builder(this).setTitle("VPN profile processed").setMessage(details).setPositiveButton("OK", null).show()
         } catch (e: Exception) {
             showError("Could not read VPN profile", e.message ?: "The selected file could not be inspected.")
         }
