@@ -23,8 +23,7 @@ import org.matrixvpn.network.TunnelConnectivityProbe
 import org.matrixvpn.profile.ImportedVpnProfile
 import org.matrixvpn.profile.VpnEndpoint
 import org.matrixvpn.profile.VpnProfileInspector
-import java.io.BufferedReader
-import java.io.StringReader
+import java.io.ByteArrayInputStream
 
 class MainActivity : Activity() {
     private lateinit var status: TextView
@@ -272,9 +271,9 @@ class MainActivity : Activity() {
                 ImportedVpnProfile.Format.UNKNOWN -> "Unknown profile format"
             }
             wireGuardConfig = null
-            if (profile.format == ImportedVpnProfile.Format.WIREGUARD) {
+            if (profile.format == ImportedVpnProfile.Format.WIREGUARD || profile.format == ImportedVpnProfile.Format.AMNEZIAWG) {
                 try {
-                    wireGuardConfig = Config.parse(BufferedReader(StringReader(profileText)))
+                    wireGuardConfig = Config.parse(ByteArrayInputStream(profileText.toByteArray(Charsets.UTF_8)))
                 } catch (e: Exception) {
                     showError("Invalid WireGuard profile", e.message ?: "The official WireGuard parser rejected this configuration.")
                 }
@@ -292,7 +291,7 @@ class MainActivity : Activity() {
                 else append("No supported, valid WireGuard/AmneziaWG configuration was loaded.")
                 append("\n\nProfile contents are kept in memory only by this build; they are not saved by MATRIX.")
             }
-            status.text = if (wireGuardConfig != null) "WireGuard profile ready\nVPN tunnel: disconnected"
+            status.text = if (wireGuardConfig != null) "$formatLabel profile ready\nVPN tunnel: disconnected"
             else "Profile inspected: $formatLabel\nVPN tunnel: disconnected"
             AlertDialog.Builder(this).setTitle("VPN profile processed").setMessage(details).setPositiveButton("OK", null).show()
         } catch (e: Exception) {
