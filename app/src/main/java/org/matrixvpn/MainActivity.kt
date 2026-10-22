@@ -5,6 +5,7 @@ import android.app.AlertDialog
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
+import android.text.InputType
 import android.view.Gravity
 import android.view.ViewGroup
 import android.widget.Button
@@ -94,7 +95,7 @@ class MainActivity : Activity() {
     private fun showAddEndpointDialog() {
         val input = EditText(this).apply {
             hint = "vpn.example.net:51820"
-            singleLine = true
+            inputType = InputType.TYPE_CLASS_TEXT
             setPadding(32, 24, 32, 24)
         }
         AlertDialog.Builder(this)
