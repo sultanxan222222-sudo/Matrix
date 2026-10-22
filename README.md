@@ -1,18 +1,18 @@
 # MATRIX VPN
 
-Adaptive Android VPN project focused on resilient connections, parallel recovery, and transparent diagnostics.
+Adaptive Android VPN project focused on resilient connections, Cloudflare WARP profile import, and transparent diagnostics.
 
 ## Current status
 
-The Android app now includes:
-- Local management of server-address candidates (host and port only).
-- Default Android network monitoring (transport type and Android's validated-internet signal).
-- Import and in-memory parsing of WireGuard profiles using the official WireGuard Android tunnel library.
-- A user-authorized WireGuard connect/disconnect flow.
+The Android app includes:
+- Import and in-memory parsing of standard WireGuard and AmneziaWG profiles.
+- An embedded AmneziaWG-capable Android tunnel library (com.zaneschepke:amneziawg-android:2.3.7), intended to support the AWG extensions emitted by WARP configuration generators.
+- A user-authorized VPN connect/disconnect flow.
+- Default Android network monitoring and an external HTTPS connectivity probe after tunnel startup.
 - OpenVPN profile recognition/preview only; OpenVPN connection support is not integrated.
-- Unit tests and GitHub Actions build/test workflow, configured to publish the debug APK as a downloadable artifact.
+- Unit tests and GitHub Actions build/test workflow, configured to publish a debug APK as a downloadable artifact.
 
-A successful build must be confirmed by the latest GitHub Actions run before treating the current revision as build-verified. Real-device connection, peer handshake, traffic routing, and reconnect behavior still require device/server testing.
+A successful CI build confirms compilation and unit tests, not a real Cloudflare WARP handshake. Real-device tests are still required to confirm each generated profile mode (Legacy, AWG 2.0, AWG 3.0 and AWG 3.1), routing, DNS, and endpoint reachability.
 
 ## Security notes
 
@@ -24,11 +24,11 @@ A successful build must be confirmed by the latest GitHub Actions run before tre
 
 ## Architecture
 
-- Network watcher: observe Android connectivity and network changes.
-- Profile inspection: recognize supported configuration formats and extract non-secret endpoint hints.
-- WireGuard backend: use the official com.wireguard.android:tunnel implementation rather than a custom cryptographic protocol.
+- Network watcher: observe Android connectivity and Android's validated-internet signal.
+- Profile inspection: identify WireGuard, AmneziaWG and OpenVPN profile formats without logging secret contents.
+- Tunnel backend: embedded AmneziaWG Android library, intended to run both ordinary WireGuard and AWG profiles.
+- Connectivity probe: test external HTTPS after tunnel startup; this does not independently prove a WireGuard peer handshake.
 - Parallel recovery: planned diagnostics of the current path while independently probing configured alternatives.
-- Adaptive transport: planned selection only among implemented, authenticated transports and endpoints.
 - Security core: keep key handling separate from decision logic.
 
 ## Build
@@ -37,8 +37,8 @@ Open in Android Studio with JDK 17 and Android SDK 35. GitHub Actions runs gradl
 
 ## Roadmap
 
-1. Establish a reproducible Android build and unit-test baseline.
-2. Integrate and validate the official WireGuard tunnel on a real Android device.
+1. Build and unit-test the AmneziaWG-capable variant.
+2. Validate generated WARP profiles on a real Android device.
 3. Add a secure multi-profile store and independent endpoint probes.
 4. Implement tested failover between fully configured, authenticated profiles.
-5. Validate reconnects, network handover, DNS behavior, traffic-leak protection, and battery use on real devices.
+5. Validate reconnects, network handover, DNS behavior, traffic-leak protection, and battery use on the device.
