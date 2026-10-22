@@ -12,7 +12,7 @@ The Android app includes:
 - OpenVPN profile recognition/preview only; OpenVPN connection support is not integrated.
 - Unit tests and GitHub Actions build/test workflow, configured to publish a debug APK as a downloadable artifact.
 
-A successful CI build confirms compilation and unit tests, not a real Cloudflare WARP handshake. Real-device tests are still required to confirm each generated profile mode (Legacy, AWG 2.0, AWG 3.0 and AWG 3.1), routing, DNS, and endpoint reachability.
+The current build toolchain uses Android Gradle Plugin 8.10.1, Kotlin 2.2.21, Gradle 8.11.1, and Android SDK 36. A successful CI build confirms compilation and unit tests, not a real Cloudflare WARP handshake. Real-device tests are still required to confirm each generated profile mode (Legacy, AWG 2.0, AWG 3.0 and AWG 3.1), routing, DNS, and endpoint reachability.
 
 ## Security notes
 
@@ -33,7 +33,7 @@ A successful CI build confirms compilation and unit tests, not a real Cloudflare
 
 ## Build
 
-Open in Android Studio with JDK 17 and Android SDK 35. GitHub Actions runs gradle testDebugUnitTest assembleDebug and uploads app/build/outputs/apk/debug/app-debug.apk as the matrix-vpn-debug-apk artifact for 14 days after a successful run.
+Open in Android Studio with JDK 17 and Android SDK 36. GitHub Actions runs gradle testDebugUnitTest assembleDebug and uploads app/build/outputs/apk/debug/app-debug.apk as the matrix-vpn-debug-apk artifact for 14 days after a successful run.
 
 ## Roadmap
 
