@@ -10,7 +10,7 @@ data class ImportedVpnProfile(
     val peerCount: Int,
     val hasInlineCredentials: Boolean
 ) {
-    enum class Format { WIREGUARD, OPENVPN, UNKNOWN }
+    enum class Format { WIREGUARD, AMNEZIAWG, OPENVPN, UNKNOWN }
 }
 
 object VpnProfileInspector {
@@ -21,17 +21,34 @@ object VpnProfileInspector {
         require(!trimmed.contains('\u0000')) { "The selected file is not a readable text profile." }
 
         val lines = trimmed.lineSequence().map { it.trim() }.toList()
-        val isWireGuard = lines.any { it.equals("[Interface]", ignoreCase = true) } &&
-            lines.any { it.equals("[Peer]", ignoreCase = true) }
+        val hasInterface = lines.any { it.equals("[Interface]", ignoreCase = true) }
+        val hasPeer = lines.any { it.equals("[Peer]", ignoreCase = true) }
+        val isWireGuard = hasInterface && hasPeer
+        val awgKeys = setOf(
+            "Jc", "Jmin", "Jmax", "S1", "S2", "S3", "S4",
+            "H1", "H2", "H3", "H4", "I1", "I2", "I3", "I4", "I5",
+            "J1", "J2", "J3", "H1", "H2", "H3", "H4",
+            "I1", "I2", "I3", "I4", "I5", "S1", "S2", "S3", "S4"
+        )
+        val hasAwgExtensions = lines.any { line ->
+            val key = line.substringBefore('=').trim()
+            key in awgKeys || key.equals("HeaderProtectionKey", ignoreCase = true) ||
+                key.equals("RandomizedPacketCorruption", ignoreCase = true) ||
+                key.equals("RandomTrailers", ignoreCase = true) ||
+                key.equals("DisableCookies", ignoreCase = true)
+        }
         val isOpenVpn = lines.any {
             it.startsWith("client", ignoreCase = true) ||
                 it.startsWith("remote ", ignoreCase = true) ||
                 it.startsWith("dev ", ignoreCase = true)
-        } && lines.any { it.startsWith("proto ", ignoreCase = true) ||
-            it.startsWith("<ca>", ignoreCase = true) ||
-            it.startsWith("remote ", ignoreCase = true) }
+        } && lines.any {
+            it.startsWith("proto ", ignoreCase = true) ||
+                it.startsWith("<ca>", ignoreCase = true) ||
+                it.startsWith("remote ", ignoreCase = true)
+        }
 
         val format = when {
+            isWireGuard && hasAwgExtensions -> ImportedVpnProfile.Format.AMNEZIAWG
             isWireGuard -> ImportedVpnProfile.Format.WIREGUARD
             isOpenVpn -> ImportedVpnProfile.Format.OPENVPN
             else -> ImportedVpnProfile.Format.UNKNOWN
