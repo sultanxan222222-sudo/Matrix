@@ -15,6 +15,7 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import org.amnezia.awg.backend.GoBackend
 import org.amnezia.awg.backend.Tunnel
+import org.amnezia.awg.backend.TunnelActionHandler
 import org.amnezia.awg.backend.Tunnel.State
 import org.amnezia.awg.config.Config
 import org.matrixvpn.network.NetworkWatcher
@@ -34,7 +35,13 @@ class MainActivity : Activity() {
     private val pickProfileRequest = 4102
     private val vpnPermissionRequest = 4103
     private val preferences by lazy { getSharedPreferences("matrix_endpoints", MODE_PRIVATE) }
-    private val wireGuardBackend by lazy { GoBackend(applicationContext) }
+    private val tunnelActions = object : TunnelActionHandler {
+        override fun runPreUp(scripts: MutableCollection<String>) {}
+        override fun runPostUp(scripts: MutableCollection<String>) {}
+        override fun runPreDown(scripts: MutableCollection<String>) {}
+        override fun runPostDown(scripts: MutableCollection<String>) {}
+    }
+    private val wireGuardBackend by lazy { GoBackend(applicationContext, tunnelActions) }
     private var wireGuardConfig: Config? = null
     private var tunnelUp = false
 
@@ -51,6 +58,8 @@ class MainActivity : Activity() {
                 connectButton.text = if (tunnelUp) "Disconnect VPN" else "Connect WireGuard VPN"
             }
         }
+        override fun isIpv4ResolutionPreferred(): Boolean = true
+        override fun isMetered(): Boolean = false
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
