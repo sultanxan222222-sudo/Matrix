@@ -31,7 +31,6 @@ import java.io.ByteArrayInputStream
 class MainActivity : Activity() {
     private lateinit var status: TextView
     private lateinit var networkStatus: TextView
-    private lateinit var endpointList: TextView
     private lateinit var connectButton: Button
     private lateinit var networkWatcher: NetworkWatcher
     private val pickProfileRequest = 4102
@@ -73,7 +72,7 @@ class MainActivity : Activity() {
             setPadding(8, 18, 8, 8)
         }
         val menuSubtitle = TextView(this).apply {
-            text = "УПРАВЛЕНИЕ VPN • ВЕРСИЯ 0.5.0"
+            text = "УПРАВЛЕНИЕ VPN • ВЕРСИЯ 0.5.1"
             textSize = 12f
             setTextColor(Color.rgb(130, 220, 150))
             gravity = Gravity.CENTER
@@ -82,7 +81,7 @@ class MainActivity : Activity() {
         val connectionHeading = sectionHeading("СОСТОЯНИЕ СОЕДИНЕНИЯ")
         val helpHeading = sectionHeading("СПРАВКА")
         status = TextView(this).apply {
-            text = "Сборка 0.5.0\nVPN-туннель: не подключён\nАвтоматическое восстановление: в разработке"
+            text = "Сборка 0.5.1\nVPN-туннель: не подключён\nАвтоматическое восстановление: прототип"
             textSize = 16f
             setTextColor(Color.WHITE)
             gravity = Gravity.CENTER
