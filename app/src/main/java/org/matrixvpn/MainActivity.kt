@@ -74,7 +74,7 @@ class MainActivity : Activity() {
             setPadding(8, 18, 8, 8)
         }
         val menuSubtitle = TextView(this).apply {
-            text = "УПРАВЛЕНИЕ VPN • ВЕРСИЯ 0.3.0"
+            text = "УПРАВЛЕНИЕ VPN • ВЕРСИЯ 0.4.0"
             textSize = 12f
             setTextColor(Color.rgb(130, 220, 150))
             gravity = Gravity.CENTER
@@ -84,7 +84,7 @@ class MainActivity : Activity() {
         val profilesHeading = sectionHeading("СЕРВЕРЫ И ПРОФИЛИ")
         val helpHeading = sectionHeading("СПРАВКА")
         status = TextView(this).apply {
-            text = "Сборка 0.3.0\nVPN-туннель: не подключён\nАвтоматическое восстановление: в разработке"
+            text = "Сборка 0.4.0\nVPN-туннель: не подключён\nАвтоматическое восстановление: в разработке"
             textSize = 16f
             setTextColor(Color.WHITE)
             gravity = Gravity.CENTER
