@@ -28,7 +28,7 @@ object TunnelConnectivityProbe {
             }
             val code = connection.responseCode
             if (code !in 200..299) {
-                TunnelProbeResult(false, code, null, "External HTTPS check returned HTTP $code.")
+                TunnelProbeResult(false, code, null, "Внешняя проверка HTTPS вернула код HTTP $code.")
             } else {
                 val body = connection.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText().take(32_000) }
                 val warp = body.lineSequence().firstOrNull { it.startsWith("warp=") }?.substringAfter('=')
@@ -37,14 +37,14 @@ object TunnelConnectivityProbe {
                     code,
                     warp,
                     if (warp == "on" || warp == "plus") {
-                        "External HTTPS works; Cloudflare reports WARP=$warp."
+                        "Внешний HTTPS доступен; статус Cloudflare WARP: $warp."
                     } else {
-                        "External HTTPS works while the tunnel is active. Cloudflare WARP status: ${warp ?: "not reported"}."
+                        "Внешний HTTPS доступен при активном туннеле. Статус Cloudflare WARP: ${warp ?: "не сообщён"}."
                     }
                 )
             }
         } catch (e: Exception) {
-            TunnelProbeResult(false, null, null, "External HTTPS check failed: ${e.message ?: e.javaClass.simpleName}")
+            TunnelProbeResult(false, null, null, "Не удалось проверить внешний HTTPS: ${e.message ?: e.javaClass.simpleName}")
         } finally {
             connection?.disconnect()
         }
