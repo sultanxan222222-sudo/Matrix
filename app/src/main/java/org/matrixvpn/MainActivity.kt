@@ -249,7 +249,7 @@ class MainActivity : Activity() {
             try {
                 startActivityForResult(Intent.createChooser(contentIntent, "Выберите файл конфигурации VPN"), pickProfileRequest)
             } catch (e: Exception) {
-                showError("Выбор файлов недоступен", "This phone does not provide a file picker. Use “Paste WARP / VPN configuration” and paste the full configuration text. Details: ${e.message ?: "unknown error"}")
+                showError("Выбор файлов недоступен", "На телефоне недоступен выбор файлов. Вставьте полный текст через пункт «Вставить конфигурацию WARP / VPN». Подробности: ${e.message ?: "неизвестная ошибка"}")
             }
         } catch (e: Exception) {
             showError("Не удалось открыть файлы", "Попробуйте вставить полный текст конфигурации WARP/WireGuard. Подробности: ${e.message ?: "неизвестная ошибка"}")
@@ -353,7 +353,7 @@ class MainActivity : Activity() {
 
     private fun processProfileText(profileText: String) {
         try {
-            require(profileText.isNotBlank()) { "Configuration is empty. Paste or select the complete .conf file." }
+            require(profileText.isNotBlank()) { "Конфигурация пустая. Вставьте текст или выберите полный файл .conf." }
             require(profileText.length <= 2_000_000) { "Файл слишком большой для безопасного импорта." }
             val profile = VpnProfileInspector.inspect(profileText)
             val formatLabel = when (profile.format) {
@@ -383,7 +383,7 @@ class MainActivity : Activity() {
                 else append("Подходящая конфигурация WireGuard/AmneziaWG не загружена.")
                 append("\n\nВ этой версии профиль хранится только в памяти и не сохраняется приложением MATRIX.")
             }
-            status.text = if (wireGuardConfig != null) "$formatLabel profile ready\nVPN tunnel: disconnected"
+            status.text = if (wireGuardConfig != null) "Профиль $formatLabel готов\nVPN-туннель: отключён"
             else "Профиль проверен: $formatLabel\nVPN-туннель: отключён"
             AlertDialog.Builder(this).setTitle("Профиль VPN обработан").setMessage(details).setPositiveButton("Понятно", null).show()
         } catch (e: Exception) {
