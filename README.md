@@ -5,14 +5,14 @@ Adaptive Android VPN project focused on resilient connections, Cloudflare WARP p
 ## Current status
 
 The Android app includes:
-- Import and in-memory parsing of standard WireGuard and AmneziaWG profiles.
+- Import and in-memory parsing of standard WireGuard and AmneziaWG profiles, from clipboard or Android file picker.
 - An embedded AmneziaWG-capable Android tunnel library (com.zaneschepke:amneziawg-android:2.3.7), intended to support the AWG extensions emitted by WARP configuration generators.
 - A user-authorized VPN connect/disconnect flow.
 - Default Android network monitoring and an external HTTPS connectivity probe after tunnel startup.
-- OpenVPN profile recognition/preview only; OpenVPN connection support is not integrated.
+- Live free-server directory from VPN Gate. Selecting a relay exports its OpenVPN profile to a compatible external OpenVPN app; MATRIX's built-in tunnel still does not connect OpenVPN profiles directly.
 - Unit tests and GitHub Actions build/test workflow, configured to publish a debug APK as a downloadable artifact.
 
-The current build toolchain uses Android Gradle Plugin 8.10.1, Kotlin 2.2.21, Gradle 8.11.1, and Android SDK 36. A successful CI build confirms compilation and unit tests, not a real Cloudflare WARP handshake. Real-device tests are still required to confirm each generated profile mode (Legacy, AWG 2.0, AWG 3.0 and AWG 3.1), routing, DNS, and endpoint reachability.
+The current app version is 0.5.1. The build toolchain uses Android Gradle Plugin 8.10.1, Kotlin 2.2.21, Gradle 8.11.1, and Android SDK 36. A successful CI build confirms compilation and unit tests, not a real Cloudflare WARP handshake. Real-device tests are still required to confirm each generated profile mode (Legacy, AWG 2.0, AWG 3.0 and AWG 3.1), routing, DNS, and endpoint reachability.
 
 ## Security notes
 
@@ -37,8 +37,8 @@ Open in Android Studio with JDK 17 and Android SDK 36. GitHub Actions runs gradl
 
 ## Roadmap
 
-1. Build and unit-test the AmneziaWG-capable variant.
-2. Validate generated WARP profiles on a real Android device.
+1. Validate generated WARP profiles on a real Android device.
+2. Integrate a native OpenVPN engine if direct VPN Gate connections inside MATRIX are required.
 3. Add a secure multi-profile store and independent endpoint probes.
 4. Implement tested failover between fully configured, authenticated profiles.
 5. Validate reconnects, network handover, DNS behavior, traffic-leak protection, and battery use on the device.
