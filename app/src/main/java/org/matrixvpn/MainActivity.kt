@@ -3,6 +3,8 @@ package org.matrixvpn
 import android.app.Activity
 import android.app.AlertDialog
 import android.content.Intent
+import android.content.res.ColorStateList
+import android.graphics.Color
 import android.net.VpnService
 import android.net.Uri
 import android.os.Bundle
@@ -12,6 +14,7 @@ import android.view.ViewGroup
 import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
+import android.widget.ScrollView
 import android.widget.TextView
 import org.amnezia.awg.backend.GoBackend
 import org.amnezia.awg.backend.Tunnel
@@ -65,20 +68,34 @@ class MainActivity : Activity() {
         super.onCreate(savedInstanceState)
         val title = TextView(this).apply {
             text = "MATRIX VPN"
-            textSize = 28f
+            textSize = 30f
+            setTextColor(Color.rgb(0, 255, 70))
             gravity = Gravity.CENTER
+            setPadding(8, 18, 8, 8)
         }
-        status = TextView(this).apply {
-            text = "Тестовая сборка\nVPN-туннель: не подключён\nМеханизм восстановления: прототип"
-            textSize = 16f
+        val menuSubtitle = TextView(this).apply {
+            text = "УПРАВЛЕНИЕ VPN • ВЕРСИЯ 0.3.0"
+            textSize = 12f
+            setTextColor(Color.rgb(130, 220, 150))
             gravity = Gravity.CENTER
-            setPadding(16, 16, 16, 16)
+            setPadding(8, 0, 8, 18)
+        }
+        val connectionHeading = sectionHeading("СОСТОЯНИЕ СОЕДИНЕНИЯ")
+        val profilesHeading = sectionHeading("СЕРВЕРЫ И ПРОФИЛИ")
+        val helpHeading = sectionHeading("СПРАВКА")
+        status = TextView(this).apply {
+            text = "Сборка 0.3.0\nVPN-туннель: не подключён\nАвтоматическое восстановление: в разработке"
+            textSize = 16f
+            setTextColor(Color.WHITE)
+            gravity = Gravity.CENTER
+            setPadding(16, 12, 16, 12)
         }
         networkStatus = TextView(this).apply {
             text = "Сеть: проверка…"
             textSize = 14f
+            setTextColor(Color.rgb(180, 210, 185))
             gravity = Gravity.CENTER
-            setPadding(8, 8, 8, 8)
+            setPadding(8, 8, 8, 12)
         }
         val addEndpointButton = Button(this).apply {
             text = "Добавить адрес сервера VPN"
@@ -115,22 +132,40 @@ class MainActivity : Activity() {
             gravity = Gravity.CENTER
             setPadding(8, 12, 8, 12)
         }
-        val mainScreen = LinearLayout(this).apply {
+        val menuContent = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            gravity = Gravity.CENTER
-            setPadding(20, 20, 20, 20)
+            gravity = Gravity.CENTER_HORIZONTAL
+            setPadding(18, 10, 18, 24)
+            setBackgroundColor(Color.rgb(4, 12, 7))
             addView(title)
-            addView(status)
-            addView(networkStatus)
-            addView(addEndpointButton, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
-            addView(endpointList)
-            addView(importButton, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
-            addView(findWireGuardButton, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
-            addView(findVpnButton, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
-            addView(pasteButton, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
-            addView(connectButton, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
-            addView(help)
+            addView(menuSubtitle)
+            addView(connectionHeading)
+            addView(status, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+            addView(networkStatus, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+            addView(profilesHeading)
+            addView(addEndpointButton, menuButtonParams())
+            addView(endpointList, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+            addView(importButton, menuButtonParams())
+            addView(findWireGuardButton, menuButtonParams())
+            addView(findVpnButton, menuButtonParams())
+            addView(pasteButton, menuButtonParams())
+            addView(connectButton, menuButtonParams())
+            addView(helpHeading)
+            addView(help, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         }
+        val mainScreen = ScrollView(this).apply {
+            isFillViewport = true
+            setBackgroundColor(Color.rgb(4, 12, 7))
+            addView(menuContent, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        }
+        listOf(addEndpointButton, importButton, findWireGuardButton, findVpnButton, pasteButton, connectButton).forEach { button ->
+            button.backgroundTintList = ColorStateList.valueOf(Color.rgb(0, 110, 40))
+            button.setTextColor(Color.WHITE)
+            button.textSize = 14f
+            button.minHeight = (48 * resources.displayMetrics.density).toInt()
+        }
+        endpointList.setTextColor(Color.rgb(170, 220, 180))
+        help.setTextColor(Color.rgb(170, 220, 180))
         setContentView(MatrixRainView(this))
         window.decorView.postDelayed({
             setContentView(mainScreen)
@@ -151,6 +186,21 @@ class MainActivity : Activity() {
         super.onStop()
     }
 
+
+    private fun sectionHeading(label: String): TextView = TextView(this).apply {
+        text = label
+        textSize = 12f
+        setTextColor(Color.rgb(0, 255, 70))
+        gravity = Gravity.START
+        setPadding(4, 18, 4, 6)
+    }
+
+    private fun menuButtonParams() = LinearLayout.LayoutParams(
+        ViewGroup.LayoutParams.MATCH_PARENT,
+        ViewGroup.LayoutParams.WRAP_CONTENT
+    ).apply {
+        bottomMargin = (6 * resources.displayMetrics.density).toInt()
+    }
 
     private fun openProfileSearch(wireGuardOnly: Boolean) {
         val title = if (wireGuardOnly) "Поиск профилей WireGuard" else "Поиск других VPN-профилей"
