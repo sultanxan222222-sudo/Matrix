@@ -249,10 +249,10 @@ class MainActivity : Activity() {
             try {
                 startActivityForResult(Intent.createChooser(contentIntent, "Выберите файл конфигурации VPN"), pickProfileRequest)
             } catch (e: Exception) {
-                showError("File picker unavailable", "This phone does not provide a file picker. Use “Paste WARP / VPN configuration” and paste the full configuration text. Details: ${e.message ?: "unknown error"}")
+                showError("Выбор файлов недоступен", "This phone does not provide a file picker. Use “Paste WARP / VPN configuration” and paste the full configuration text. Details: ${e.message ?: "unknown error"}")
             }
         } catch (e: Exception) {
-            showError("Could not open files", "Попробуйте вставить полный текст конфигурации WARP/WireGuard. Подробности: ${e.message ?: "неизвестная ошибка"}")
+            showError("Не удалось открыть файлы", "Попробуйте вставить полный текст конфигурации WARP/WireGuard. Подробности: ${e.message ?: "неизвестная ошибка"}")
         }
     }
 
@@ -270,7 +270,7 @@ class MainActivity : Activity() {
             .setMessage("Open the WARP generator, copy the complete WireGuard/AmneziaWG configuration, then paste it here. Do not paste a folder path or a server address alone.")
             .setView(input)
             .setNegativeButton("Отмена", null)
-            .setPositiveButton("Validate") { _, _ -> processProfileText(input.text.toString()) }
+            .setPositiveButton("Проверить") { _, _ -> processProfileText(input.text.toString()) }
             .show()
     }
 
@@ -332,7 +332,7 @@ class MainActivity : Activity() {
         AlertDialog.Builder(this).setTitle(title).setMessage(message).setPositiveButton("Понятно", null).show()
     }
 
-    @Deprecated("Uses the platform document picker result API for broad Android compatibility.")
+    @Deprecated("Используется системный выбор файлов для совместимости с разными версиями Android.")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
         if (requestCode == vpnPermissionRequest) {
@@ -387,7 +387,7 @@ class MainActivity : Activity() {
             else "Профиль проверен: $formatLabel\nVPN-туннель: отключён"
             AlertDialog.Builder(this).setTitle("Профиль VPN обработан").setMessage(details).setPositiveButton("Понятно", null).show()
         } catch (e: Exception) {
-            showError("Не удалось обработать профиль VPN", e.message ?: "The configuration could not be inspected.")
+            showError("Не удалось обработать профиль VPN", e.message ?: "Не удалось проверить конфигурацию.")
         }
     }
 }
