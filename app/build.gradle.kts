@@ -21,6 +21,7 @@ android {
     kotlinOptions { jvmTarget = "17" }
 }
 dependencies {
+    implementation("androidx.core:core-ktx:1.15.0")
     // Embeddable AmneziaWG tunnel library; supports AWG configuration extensions
     // while retaining the WireGuard Android backend/config API used by MATRIX.
     implementation("com.zaneschepke:amneziawg-android:2.3.7")
