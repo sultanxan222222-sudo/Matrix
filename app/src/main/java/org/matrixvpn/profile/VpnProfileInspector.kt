@@ -16,9 +16,9 @@ data class ImportedVpnProfile(
 object VpnProfileInspector {
     fun inspect(text: String): ImportedVpnProfile {
         val trimmed = text.trim()
-        require(trimmed.isNotEmpty()) { "The selected profile is empty." }
-        require(trimmed.length <= 2_000_000) { "The profile is too large to preview safely." }
-        require(!trimmed.contains('\u0000')) { "The selected file is not a readable text profile." }
+        require(trimmed.isNotEmpty()) { "Выбранный профиль пуст." }
+        require(trimmed.length <= 2_000_000) { "Файл профиля слишком большой для безопасной проверки." }
+        require(!trimmed.contains('\u0000')) { "Выбранный файл не является читаемым текстовым профилем." }
 
         val lines = trimmed.lineSequence().map { it.trim() }.toList()
         val hasInterface = lines.any { it.equals("[Interface]", ignoreCase = true) }
