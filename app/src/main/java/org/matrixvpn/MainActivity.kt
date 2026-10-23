@@ -267,7 +267,7 @@ class MainActivity : Activity() {
         }
         AlertDialog.Builder(this)
             .setTitle("Вставить конфигурацию WARP / VPN")
-            .setMessage("Open the WARP generator, copy the complete WireGuard/AmneziaWG configuration, then paste it here. Do not paste a folder path or a server address alone.")
+            .setMessage("Откройте генератор WARP, скопируйте полную конфигурацию WireGuard/AmneziaWG и вставьте её сюда. Не вставляйте путь к папке или только адрес сервера.")
             .setView(input)
             .setNegativeButton("Отмена", null)
             .setPositiveButton("Проверить") { _, _ -> processProfileText(input.text.toString()) }
@@ -373,9 +373,9 @@ class MainActivity : Activity() {
             connectButton.isEnabled = wireGuardConfig != null
             val endpointText = if (profile.endpointHints.isEmpty()) "Адрес сервера не найден" else profile.endpointHints.joinToString("\n")
             val details = buildString {
-                append("Detected format: ").append(formatLabel).append("\n")
-                if (profile.peerCount > 0) append("Peers: ").append(profile.peerCount).append("\n")
-                append("Endpoint hints:\n").append(endpointText).append("\n\n")
+                append("Определённый формат: ").append(formatLabel).append("\n")
+                if (profile.peerCount > 0) append("Количество узлов: ").append(profile.peerCount).append("\n")
+                append("Обнаруженные адреса серверов:\n").append(endpointText).append("\n\n")
                 if (profile.hasInlineCredentials) append("Профиль содержит приватные ключи или учётные данные. Не передавайте его посторонним.\n\n")
                 if (wireGuardConfig != null && profile.format == ImportedVpnProfile.Format.AMNEZIAWG) append("Профиль AmneziaWG принят встроенным модулем AWG. Можно запросить разрешение Android и подключиться.")
                 else if (wireGuardConfig != null) append("Конфигурация WireGuard проверена. Теперь можно запросить разрешение Android и подключиться.")
