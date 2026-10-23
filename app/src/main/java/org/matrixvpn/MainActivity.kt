@@ -110,8 +110,8 @@ class MainActivity : Activity() {
             setOnClickListener { fetchFreeWarpProfile() }
         }
         val findVpnButton = Button(this).apply {
-            text = "Получить новый профиль WARP"
-            setOnClickListener { fetchFreeWarpProfile() }
+            text = "Найти VPN-сервисы в интернете"
+            setOnClickListener { searchVpnServices() }
         }
         val pasteButton = Button(this).apply {
             text = "Вставить конфигурацию WARP / VPN"
