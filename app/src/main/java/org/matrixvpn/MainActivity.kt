@@ -50,11 +50,11 @@ class MainActivity : Activity() {
             runOnUiThread {
                 tunnelUp = newState == State.UP
                 status.text = if (tunnelUp) {
-                    "VPN tunnel: connected\nChecking external HTTPS…\nRecovery engine: prototype"
+                    "VPN-туннель: подключён\nПроверка HTTPS-доступа…\nМеханизм восстановления: прототип"
                 } else {
-                    "VPN tunnel: disconnected\nRecovery engine: prototype"
+                    "VPN-туннель: отключён\nМеханизм восстановления: прототип"
                 }
-                connectButton.text = if (tunnelUp) "Disconnect VPN" else "Connect VPN"
+                connectButton.text = if (tunnelUp) "Отключить VPN" else "Подключить VPN"
             }
         }
         override fun isIpv4ResolutionPreferred(): Boolean = true
@@ -69,31 +69,39 @@ class MainActivity : Activity() {
             gravity = Gravity.CENTER
         }
         status = TextView(this).apply {
-            text = "Development build\nVPN tunnel: not connected\nRecovery engine: prototype"
+            text = "Тестовая сборка\nVPN-туннель: не подключён\nМеханизм восстановления: прототип"
             textSize = 16f
             gravity = Gravity.CENTER
             setPadding(16, 16, 16, 16)
         }
         networkStatus = TextView(this).apply {
-            text = "Network: checking…"
+            text = "Сеть: проверка…"
             textSize = 14f
             gravity = Gravity.CENTER
             setPadding(8, 8, 8, 8)
         }
         val addEndpointButton = Button(this).apply {
-            text = "Add VPN server address"
+            text = "Добавить адрес сервера VPN"
             setOnClickListener { showAddEndpointDialog() }
         }
         val importButton = Button(this).apply {
-            text = "Import VPN profile"
+            text = "Импортировать профиль VPN"
             setOnClickListener { chooseVpnProfile() }
         }
+        val findWireGuardButton = Button(this).apply {
+            text = "Найти профили WireGuard"
+            setOnClickListener { openProfileSearch(true) }
+        }
+        val findVpnButton = Button(this).apply {
+            text = "Найти другие VPN-профили"
+            setOnClickListener { openProfileSearch(false) }
+        }
         val pasteButton = Button(this).apply {
-            text = "Paste WARP / VPN configuration"
+            text = "Вставить конфигурацию WARP / VPN"
             setOnClickListener { showPasteProfileDialog() }
         }
         connectButton = Button(this).apply {
-            text = "Connect VPN"
+            text = "Подключить VPN"
             isEnabled = false
             setOnClickListener { connectOrDisconnect() }
         }
@@ -102,7 +110,7 @@ class MainActivity : Activity() {
             setPadding(12, 12, 12, 12)
         }
         val help = TextView(this).apply {
-            text = "WireGuard and AmneziaWG profiles, including compatible configs from the WARP generator, can be connected with Android VPN permission. OpenVPN files can be previewed but require a separate OpenVPN engine. Server addresses are candidate hints only; an address by itself is not enough to connect. After starting a tunnel, MATRIX checks whether an external HTTPS request succeeds."
+            text = "Здесь можно подключать профили WireGuard и AmneziaWG (AWG), в том числе совместимые конфигурации из генератора WARP. Для подключения Android запросит разрешение. Файлы OpenVPN можно распознать, но для подключения нужен отдельный модуль OpenVPN. Один адрес сервера не заменяет полный профиль. После запуска проверяется доступ в интернет."
             textSize = 13f
             gravity = Gravity.CENTER
             setPadding(8, 12, 8, 12)
@@ -117,6 +125,8 @@ class MainActivity : Activity() {
             addView(addEndpointButton, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
             addView(endpointList)
             addView(importButton, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+            addView(findWireGuardButton, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+            addView(findVpnButton, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
             addView(pasteButton, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
             addView(connectButton, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
             addView(help)
@@ -137,6 +147,33 @@ class MainActivity : Activity() {
         super.onStop()
     }
 
+
+    private fun openProfileSearch(wireGuardOnly: Boolean) {
+        val title = if (wireGuardOnly) "Поиск профилей WireGuard" else "Поиск других VPN-профилей"
+        val message = if (wireGuardOnly) {
+            "Откроется поиск общедоступных конфигураций WireGuard. Выбирайте только источники, которым доверяете. После загрузки файла вернитесь сюда и нажмите «Импортировать профиль VPN». Сам адрес сервера не обеспечивает подключение."
+        } else {
+            "Откроется поиск общедоступных VPN-профилей. Поддерживаемые здесь форматы — WireGuard и AmneziaWG. OpenVPN пока можно только распознать, подключение не поддерживается. Бесплатные профили могут быть небезопасны и переставать работать."
+        }
+        AlertDialog.Builder(this)
+            .setTitle(title)
+            .setMessage(message)
+            .setNegativeButton("Отмена", null)
+            .setPositiveButton("Открыть поиск") { _, _ ->
+                val query = if (wireGuardOnly) {
+                    "https://github.com/search?q=wireguard+free+config+conf&type=code"
+                } else {
+                    "https://github.com/search?q=free+vpn+configuration+wireguard+amneziawg&type=repositories"
+                }
+                try {
+                    startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(query)))
+                } catch (_: Exception) {
+                    showError("Не удалось открыть поиск", "Проверьте, что на телефоне установлен браузер.")
+                }
+            }
+            .show()
+    }
+
     private fun showAddEndpointDialog() {
         val input = EditText(this).apply {
             hint = "vpn.example.net:51820"
@@ -144,11 +181,11 @@ class MainActivity : Activity() {
             setPadding(32, 24, 32, 24)
         }
         AlertDialog.Builder(this)
-            .setTitle("Add VPN server address")
-            .setMessage("Enter host:port. This saves the address as a candidate only; it does not connect or test the server.")
+            .setTitle("Добавить адрес сервера VPN")
+            .setMessage("Введите адрес в формате хост:порт. Адрес будет только сохранён в списке — соединение не проверяется и не запускается.")
             .setView(input)
-            .setNegativeButton("Cancel", null)
-            .setPositiveButton("Save") { _, _ ->
+            .setNegativeButton("Отмена", null)
+            .setPositiveButton("Сохранить") { _, _ ->
                 try {
                     val endpoint = VpnEndpoint.parse(input.text.toString())
                     val entries = preferences.getStringSet("addresses", emptySet()).orEmpty().toMutableSet()
@@ -157,9 +194,9 @@ class MainActivity : Activity() {
                     refreshEndpointList()
                 } catch (e: IllegalArgumentException) {
                     AlertDialog.Builder(this)
-                        .setTitle("Address not accepted")
-                        .setMessage(e.message ?: "Check the host and port.")
-                        .setPositiveButton("OK", null)
+                        .setTitle("Неверный адрес")
+                        .setMessage(e.message ?: "Проверьте адрес и порт.")
+                        .setPositiveButton("Понятно", null)
                         .show()
                 }
             }
@@ -168,20 +205,20 @@ class MainActivity : Activity() {
 
     private fun refreshEndpointList() {
         val entries = preferences.getStringSet("addresses", emptySet()).orEmpty().toList().sorted()
-        endpointList.text = if (entries.isEmpty()) "Saved server candidates: none"
-        else "Saved server candidates (tap and hold to remove):\n" + entries.joinToString("\n")
+        endpointList.text = if (entries.isEmpty()) "Сохранённых адресов серверов нет"
+        else "Сохранённые адреса серверов (удерживайте адрес, чтобы удалить):\n" + entries.joinToString("\n")
         endpointList.setOnLongClickListener {
             if (entries.isEmpty()) return@setOnLongClickListener false
             val labels = entries.toTypedArray()
             AlertDialog.Builder(this)
-                .setTitle("Remove saved address")
+                .setTitle("Удалить сохранённый адрес")
                 .setItems(labels) { _, which ->
                     val updated = preferences.getStringSet("addresses", emptySet()).orEmpty().toMutableSet()
                     updated.remove(labels[which])
                     preferences.edit().putStringSet("addresses", updated).apply()
                     refreshEndpointList()
                 }
-                .setNegativeButton("Cancel", null)
+                .setNegativeButton("Отмена", null)
                 .show()
             true
         }
@@ -206,12 +243,12 @@ class MainActivity : Activity() {
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             }
             try {
-                startActivityForResult(Intent.createChooser(contentIntent, "Select VPN configuration"), pickProfileRequest)
+                startActivityForResult(Intent.createChooser(contentIntent, "Выберите файл конфигурации VPN"), pickProfileRequest)
             } catch (e: Exception) {
                 showError("File picker unavailable", "This phone does not provide a file picker. Use “Paste WARP / VPN configuration” and paste the full configuration text. Details: ${e.message ?: "unknown error"}")
             }
         } catch (e: Exception) {
-            showError("Could not open files", "Try the paste option and insert the full WARP/WireGuard configuration text. Details: ${e.message ?: "unknown error"}")
+            showError("Could not open files", "Попробуйте вставить полный текст конфигурации WARP/WireGuard. Подробности: ${e.message ?: "неизвестная ошибка"}")
         }
     }
 
@@ -225,10 +262,10 @@ class MainActivity : Activity() {
             setPadding(24, 20, 24, 20)
         }
         AlertDialog.Builder(this)
-            .setTitle("Paste WARP / VPN configuration")
+            .setTitle("Вставить конфигурацию WARP / VPN")
             .setMessage("Open the WARP generator, copy the complete WireGuard/AmneziaWG configuration, then paste it here. Do not paste a folder path or a server address alone.")
             .setView(input)
-            .setNegativeButton("Cancel", null)
+            .setNegativeButton("Отмена", null)
             .setPositiveButton("Validate") { _, _ -> processProfileText(input.text.toString()) }
             .show()
     }
@@ -240,20 +277,20 @@ class MainActivity : Activity() {
                 try {
                     wireGuardBackend.setState(matrixTunnel, State.DOWN, null)
                     runOnUiThread {
-                        status.text = "VPN tunnel: disconnected"
+                        status.text = "VPN-туннель: отключён"
                         connectButton.isEnabled = true
                     }
                 } catch (e: Exception) {
                     runOnUiThread {
                         connectButton.isEnabled = true
-                        showError("Disconnect failed", e.message ?: "Could not stop the tunnel.")
+                        showError("Не удалось отключить VPN", e.message ?: "Не удалось остановить туннель.")
                     }
                 }
             }.start()
             return
         }
         if (wireGuardConfig == null) {
-            showError("No VPN profile", "Import and validate a WireGuard or AmneziaWG .conf file first.")
+            showError("Нет профиля VPN", "Сначала импортируйте и проверьте файл WireGuard или AmneziaWG .conf.")
             return
         }
         val prepareIntent = VpnService.prepare(this)
@@ -263,7 +300,7 @@ class MainActivity : Activity() {
 
     private fun startWireGuardTunnel() {
         val config = wireGuardConfig ?: return
-        status.text = "Starting VPN tunnel…"
+        status.text = "Запуск VPN-туннеля…"
         connectButton.isEnabled = false
         Thread {
             try {
@@ -271,24 +308,24 @@ class MainActivity : Activity() {
                 val probe = TunnelConnectivityProbe.check()
                 runOnUiThread {
                     status.text = if (probe.reachable) {
-                        "VPN tunnel: active\n${probe.message}\nPeer handshake is not independently confirmed."
+                        "VPN-туннель запущен\n${probe.message}\nПодтверждение рукопожатия с сервером отдельно не проверено."
                     } else {
-                        "VPN tunnel: started, but internet check failed.\n${probe.message}\nThe server may be unreachable or the profile may not route internet traffic."
+                        "VPN-туннель запущен, но проверка интернета не пройдена.\n${probe.message}\nСервер может быть недоступен или профиль может не направлять интернет-трафик через туннель."
                     }
                     connectButton.isEnabled = true
-                    connectButton.text = if (tunnelUp) "Disconnect VPN" else "Connect VPN"
+                    connectButton.text = if (tunnelUp) "Отключить VPN" else "Подключить VPN"
                 }
             } catch (e: Exception) {
                 runOnUiThread {
                     connectButton.isEnabled = true
-                    showError("Connection failed", e.message ?: "WireGuard could not start. Check the profile and Android VPN permission.")
+                    showError("Ошибка подключения", e.message ?: "Не удалось запустить WireGuard. Проверьте профиль и разрешение Android на VPN.")
                 }
             }
         }.start()
     }
 
     private fun showError(title: String, message: String) {
-        AlertDialog.Builder(this).setTitle(title).setMessage(message).setPositiveButton("OK", null).show()
+        AlertDialog.Builder(this).setTitle(title).setMessage(message).setPositiveButton("Понятно", null).show()
     }
 
     @Deprecated("Uses the platform document picker result API for broad Android compatibility.")
@@ -296,57 +333,57 @@ class MainActivity : Activity() {
         super.onActivityResult(requestCode, resultCode, data)
         if (requestCode == vpnPermissionRequest) {
             if (resultCode == RESULT_OK) startWireGuardTunnel()
-            else showError("VPN permission denied", "Android did not authorize MATRIX to create a VPN tunnel.")
+            else showError("Разрешение VPN не предоставлено", "Android не разрешил приложению MATRIX создать VPN-туннель.")
             return
         }
         if (requestCode != pickProfileRequest || resultCode != RESULT_OK) return
         val uri: Uri = data?.data ?: return
         try {
             val profileText = contentResolver.openInputStream(uri)?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }
-                ?: throw IllegalArgumentException("Could not read the selected file.")
+                ?: throw IllegalArgumentException("Не удалось прочитать выбранный файл.")
             processProfileText(profileText)
         } catch (e: Exception) {
-            showError("Could not read VPN profile", e.message ?: "The selected file could not be inspected.")
+            showError("Не удалось прочитать профиль VPN", e.message ?: "Не удалось проверить выбранный файл.")
         }
     }
 
     private fun processProfileText(profileText: String) {
         try {
             require(profileText.isNotBlank()) { "Configuration is empty. Paste or select the complete .conf file." }
-            require(profileText.length <= 2_000_000) { "The selected profile is too large to import safely." }
+            require(profileText.length <= 2_000_000) { "Файл слишком большой для безопасного импорта." }
             val profile = VpnProfileInspector.inspect(profileText)
             val formatLabel = when (profile.format) {
                 ImportedVpnProfile.Format.WIREGUARD -> "WireGuard"
                 ImportedVpnProfile.Format.AMNEZIAWG -> "AmneziaWG (AWG)"
                 ImportedVpnProfile.Format.OPENVPN -> "OpenVPN"
-                ImportedVpnProfile.Format.UNKNOWN -> "Unknown profile format"
+                ImportedVpnProfile.Format.UNKNOWN -> "Неизвестный формат профиля"
             }
             wireGuardConfig = null
             if (profile.format == ImportedVpnProfile.Format.WIREGUARD || profile.format == ImportedVpnProfile.Format.AMNEZIAWG) {
                 try {
                     wireGuardConfig = Config.parse(ByteArrayInputStream(profileText.toByteArray(Charsets.UTF_8)))
                 } catch (e: Exception) {
-                    showError("Invalid WireGuard profile", e.message ?: "The official WireGuard parser rejected this configuration.")
+                    showError("Неверный профиль WireGuard", e.message ?: "Проверка WireGuard отклонила эту конфигурацию.")
                 }
             }
             connectButton.isEnabled = wireGuardConfig != null
-            val endpointText = if (profile.endpointHints.isEmpty()) "No endpoint address detected" else profile.endpointHints.joinToString("\n")
+            val endpointText = if (profile.endpointHints.isEmpty()) "Адрес сервера не найден" else profile.endpointHints.joinToString("\n")
             val details = buildString {
                 append("Detected format: ").append(formatLabel).append("\n")
                 if (profile.peerCount > 0) append("Peers: ").append(profile.peerCount).append("\n")
                 append("Endpoint hints:\n").append(endpointText).append("\n\n")
-                if (profile.hasInlineCredentials) append("This profile contains private keys or credentials. Keep it private.\n\n")
-                if (wireGuardConfig != null && profile.format == ImportedVpnProfile.Format.AMNEZIAWG) append("AmneziaWG profile accepted by the integrated AWG-capable tunnel library. You can request Android VPN permission and connect.")
-                else if (wireGuardConfig != null) append("WireGuard configuration validated. You can now request Android VPN permission and connect.")
-                else if (profile.format == ImportedVpnProfile.Format.OPENVPN) append("OpenVPN profile recognized, but the OpenVPN engine is not integrated yet.")
-                else append("No supported, valid WireGuard/AmneziaWG configuration was loaded.")
-                append("\n\nProfile contents are kept in memory only by this build; they are not saved by MATRIX.")
+                if (profile.hasInlineCredentials) append("Профиль содержит приватные ключи или учётные данные. Не передавайте его посторонним.\n\n")
+                if (wireGuardConfig != null && profile.format == ImportedVpnProfile.Format.AMNEZIAWG) append("Профиль AmneziaWG принят встроенным модулем AWG. Можно запросить разрешение Android и подключиться.")
+                else if (wireGuardConfig != null) append("Конфигурация WireGuard проверена. Теперь можно запросить разрешение Android и подключиться.")
+                else if (profile.format == ImportedVpnProfile.Format.OPENVPN) append("Профиль OpenVPN распознан, но модуль для подключения OpenVPN пока не встроен.")
+                else append("Подходящая конфигурация WireGuard/AmneziaWG не загружена.")
+                append("\n\nВ этой версии профиль хранится только в памяти и не сохраняется приложением MATRIX.")
             }
             status.text = if (wireGuardConfig != null) "$formatLabel profile ready\nVPN tunnel: disconnected"
-            else "Profile inspected: $formatLabel\nVPN tunnel: disconnected"
-            AlertDialog.Builder(this).setTitle("VPN profile processed").setMessage(details).setPositiveButton("OK", null).show()
+            else "Профиль проверен: $formatLabel\nVPN-туннель: отключён"
+            AlertDialog.Builder(this).setTitle("Профиль VPN обработан").setMessage(details).setPositiveButton("Понятно", null).show()
         } catch (e: Exception) {
-            showError("Could not process VPN profile", e.message ?: "The configuration could not be inspected.")
+            showError("Не удалось обработать профиль VPN", e.message ?: "The configuration could not be inspected.")
         }
     }
 }
