@@ -106,12 +106,12 @@ class MainActivity : Activity() {
             setOnClickListener { chooseVpnProfile() }
         }
         val findWireGuardButton = Button(this).apply {
-            text = "Найти профили WireGuard"
-            setOnClickListener { openProfileSearch(true) }
+            text = "Найти и настроить бесплатный WARP"
+            setOnClickListener { fetchFreeWarpProfile() }
         }
         val findVpnButton = Button(this).apply {
-            text = "Найти другие VPN-профили"
-            setOnClickListener { openProfileSearch(false) }
+            text = "Получить новый профиль WARP"
+            setOnClickListener { fetchFreeWarpProfile() }
         }
         val pasteButton = Button(this).apply {
             text = "Вставить конфигурацию WARP / VPN"
@@ -202,30 +202,67 @@ class MainActivity : Activity() {
         bottomMargin = (6 * resources.displayMetrics.density).toInt()
     }
 
-    private fun openProfileSearch(wireGuardOnly: Boolean) {
-        val title = if (wireGuardOnly) "Поиск профилей WireGuard" else "Поиск других VPN-профилей"
-        val message = if (wireGuardOnly) {
-            "Откроется поиск общедоступных конфигураций WireGuard. Выбирайте только источники, которым доверяете. После загрузки файла вернитесь сюда и нажмите «Импортировать профиль VPN». Сам адрес сервера не обеспечивает подключение."
-        } else {
-            "Откроется поиск общедоступных VPN-профилей. Поддерживаемые здесь форматы — WireGuard и AmneziaWG. OpenVPN пока можно только распознать, подключение не поддерживается. Бесплатные профили могут быть небезопасны и переставать работать."
-        }
-        AlertDialog.Builder(this)
-            .setTitle(title)
-            .setMessage(message)
-            .setNegativeButton("Отмена", null)
-            .setPositiveButton("Открыть поиск") { _, _ ->
-                val query = if (wireGuardOnly) {
-                    "https://github.com/search?q=wireguard+free+config+conf&type=code"
-                } else {
-                    "https://github.com/search?q=free+vpn+configuration+wireguard+amneziawg&type=repositories"
+    /** Fetches a fresh free Cloudflare WARP-compatible WireGuard profile from the public generator API. */
+    private fun fetchFreeWarpProfile() {
+        status.text = "Получение бесплатного профиля WARP…"
+        connectButton.isEnabled = false
+        Thread {
+            var connection: java.net.HttpURLConnection? = null
+            try {
+                val url = java.net.URL("https://awgconfig.com/api/warp?mode=legacy&count=1&dns=cloudflare")
+                connection = (url.openConnection() as java.net.HttpURLConnection).apply {
+                    requestMethod = "GET"
+                    connectTimeout = 15000
+                    readTimeout = 20000
+                    setRequestProperty("Accept", "application/json")
+                    setRequestProperty("User-Agent", "MATRIX-VPN-Android/0.4.0")
+                    instanceFollowRedirects = true
                 }
-                try {
-                    startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(query)))
-                } catch (_: Exception) {
-                    showError("Не удалось открыть поиск", "Проверьте, что на телефоне установлен браузер.")
+                val code = connection.responseCode
+                val stream = if (code in 200..299) connection.inputStream else connection.errorStream
+                val response = stream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }
+                    ?: throw IllegalStateException("Сервис не вернул ответ (HTTP $code).")
+                require(response.length <= 1_000_000) { "Ответ сервиса слишком большой." }
+                if (code !in 200..299) throw IllegalStateException("Сервис WARP ответил с кодом HTTP $code.")
+                val json = org.json.JSONObject(response)
+                if (json.optBoolean("success", true).not()) {
+                    throw IllegalStateException(json.optString("error").ifBlank { "Сервис не смог создать профиль WARP." })
                 }
+                var encoded = json.optString("content")
+                if (encoded.isBlank()) {
+                    val configs = json.optJSONArray("configs")
+                    if (configs != null && configs.length() > 0) encoded = configs.getJSONObject(0).optString("content")
+                }
+                require(encoded.isNotBlank()) { "Сервис не вернул файл конфигурации." }
+                val profileText = try {
+                    String(android.util.Base64.decode(encoded, android.util.Base64.DEFAULT), Charsets.UTF_8)
+                } catch (_: IllegalArgumentException) {
+                    encoded
+                }
+                require(profileText.contains("[Interface]", ignoreCase = true) &&
+                    profileText.contains("[Peer]", ignoreCase = true)) {
+                    "Сервис вернул данные в неизвестном формате."
+                }
+                runOnUiThread {
+                    processProfileText(profileText)
+                    if (wireGuardConfig != null) {
+                        status.text = "Бесплатный профиль WARP готов\nVPN-туннель: отключён\nНажмите «Подключить VPN»."
+                    }
+                }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    connectButton.isEnabled = wireGuardConfig != null
+                    status.text = "Не удалось получить профиль WARP"
+                    showError(
+                        "Автоматическая настройка не удалась",
+                        (e.message ?: "Сервис WARP сейчас недоступен.") +
+                            "\n\nПроверьте интернет и попробуйте ещё раз. Генератор — сторонний бесплатный сервис, его доступность не гарантируется."
+                    )
+                }
+            } finally {
+                connection?.disconnect()
             }
-            .show()
+        }.start()
     }
 
     private fun showAddEndpointDialog() {
