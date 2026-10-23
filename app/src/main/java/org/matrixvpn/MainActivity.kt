@@ -25,7 +25,6 @@ import org.amnezia.awg.config.Config
 import org.matrixvpn.network.NetworkWatcher
 import org.matrixvpn.network.TunnelConnectivityProbe
 import org.matrixvpn.profile.ImportedVpnProfile
-import org.matrixvpn.profile.VpnEndpoint
 import org.matrixvpn.profile.VpnProfileInspector
 import java.io.ByteArrayInputStream
 
@@ -37,7 +36,6 @@ class MainActivity : Activity() {
     private lateinit var networkWatcher: NetworkWatcher
     private val pickProfileRequest = 4102
     private val vpnPermissionRequest = 4103
-    private val preferences by lazy { getSharedPreferences("matrix_endpoints", MODE_PRIVATE) }
     private val tunnelActions = object : TunnelActionHandler {
         override fun runPreUp(scripts: MutableCollection<String>) {}
         override fun runPostUp(scripts: MutableCollection<String>) {}
@@ -82,7 +80,6 @@ class MainActivity : Activity() {
             setPadding(8, 0, 8, 18)
         }
         val connectionHeading = sectionHeading("СОСТОЯНИЕ СОЕДИНЕНИЯ")
-        val profilesHeading = sectionHeading("СЕРВЕРЫ И ПРОФИЛИ")
         val helpHeading = sectionHeading("СПРАВКА")
         status = TextView(this).apply {
             text = "Сборка 0.5.0\nVPN-туннель: не подключён\nАвтоматическое восстановление: в разработке"
@@ -97,10 +94,6 @@ class MainActivity : Activity() {
             setTextColor(Color.rgb(180, 210, 185))
             gravity = Gravity.CENTER
             setPadding(8, 8, 8, 12)
-        }
-        val addEndpointButton = Button(this).apply {
-            text = "Добавить адрес сервера VPN"
-            setOnClickListener { showAddEndpointDialog() }
         }
         val importButton = Button(this).apply {
             text = "2. Импорт файла с телефона"
@@ -123,10 +116,6 @@ class MainActivity : Activity() {
             isEnabled = false
             setOnClickListener { connectOrDisconnect() }
         }
-        endpointList = TextView(this).apply {
-            textSize = 14f
-            setPadding(12, 12, 12, 12)
-        }
         val help = TextView(this).apply {
             text = "Импортируйте конфигурацию из буфера или файл с телефона. WARP работает отдельно. Пункт бесплатных серверов получает актуальный каталог VPN Gate и передаёт OpenVPN-профиль совместимому приложению; встроенное подключение MATRIX пока поддерживает WireGuard/AmneziaWG. Бесплатные серверы добровольцев не гарантируют доступность и конфиденциальность."
             textSize = 13f
@@ -143,9 +132,6 @@ class MainActivity : Activity() {
             addView(connectionHeading)
             addView(status, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
             addView(networkStatus, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
-            addView(profilesHeading)
-            addView(addEndpointButton, menuButtonParams())
-            addView(endpointList, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
             addView(importButton, menuButtonParams())
             addView(findWireGuardButton, menuButtonParams())
             addView(findVpnButton, menuButtonParams())
@@ -159,7 +145,7 @@ class MainActivity : Activity() {
             setBackgroundColor(Color.rgb(4, 12, 7))
             addView(menuContent, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         }
-        listOf(addEndpointButton, importButton, findWireGuardButton, findVpnButton, pasteButton, connectButton).forEach { button ->
+        listOf(importButton, findWireGuardButton, findVpnButton, pasteButton, connectButton).forEach { button ->
             button.backgroundTintList = ColorStateList.valueOf(Color.rgb(0, 110, 40))
             button.setTextColor(Color.WHITE)
             button.textSize = 14f
@@ -440,56 +426,6 @@ class MainActivity : Activity() {
             processProfileText(text)
         } catch (e: Exception) {
             showError("Не удалось прочитать буфер телефона", e.message ?: "Скопируйте полный профиль и повторите попытку.")
-        }
-    }
-
-    private fun showAddEndpointDialog() {
-        val input = EditText(this).apply {
-            hint = "vpn.example.net:51820"
-            inputType = InputType.TYPE_CLASS_TEXT
-            setPadding(32, 24, 32, 24)
-        }
-        AlertDialog.Builder(this)
-            .setTitle("Добавить адрес сервера VPN")
-            .setMessage("Введите адрес в формате хост:порт. Адрес будет только сохранён в списке — соединение не проверяется и не запускается.")
-            .setView(input)
-            .setNegativeButton("Отмена", null)
-            .setPositiveButton("Сохранить") { _, _ ->
-                try {
-                    val endpoint = VpnEndpoint.parse(input.text.toString())
-                    val entries = preferences.getStringSet("addresses", emptySet()).orEmpty().toMutableSet()
-                    entries.add(endpoint.displayAddress)
-                    preferences.edit().putStringSet("addresses", entries).apply()
-                    refreshEndpointList()
-                } catch (e: IllegalArgumentException) {
-                    AlertDialog.Builder(this)
-                        .setTitle("Неверный адрес")
-                        .setMessage(e.message ?: "Проверьте адрес и порт.")
-                        .setPositiveButton("Понятно", null)
-                        .show()
-                }
-            }
-            .show()
-    }
-
-    private fun refreshEndpointList() {
-        val entries = preferences.getStringSet("addresses", emptySet()).orEmpty().toList().sorted()
-        endpointList.text = if (entries.isEmpty()) "Сохранённых адресов серверов нет"
-        else "Сохранённые адреса серверов (удерживайте адрес, чтобы удалить):\n" + entries.joinToString("\n")
-        endpointList.setOnLongClickListener {
-            if (entries.isEmpty()) return@setOnLongClickListener false
-            val labels = entries.toTypedArray()
-            AlertDialog.Builder(this)
-                .setTitle("Удалить сохранённый адрес")
-                .setItems(labels) { _, which ->
-                    val updated = preferences.getStringSet("addresses", emptySet()).orEmpty().toMutableSet()
-                    updated.remove(labels[which])
-                    preferences.edit().putStringSet("addresses", updated).apply()
-                    refreshEndpointList()
-                }
-                .setNegativeButton("Отмена", null)
-                .show()
-            true
         }
     }
 
