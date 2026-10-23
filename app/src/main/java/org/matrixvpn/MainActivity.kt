@@ -74,7 +74,7 @@ class MainActivity : Activity() {
             setPadding(8, 18, 8, 8)
         }
         val menuSubtitle = TextView(this).apply {
-            text = "УПРАВЛЕНИЕ VPN • ВЕРСИЯ 0.4.0"
+            text = "УПРАВЛЕНИЕ VPN • ВЕРСИЯ 0.5.0"
             textSize = 12f
             setTextColor(Color.rgb(130, 220, 150))
             gravity = Gravity.CENTER
@@ -84,7 +84,7 @@ class MainActivity : Activity() {
         val profilesHeading = sectionHeading("СЕРВЕРЫ И ПРОФИЛИ")
         val helpHeading = sectionHeading("СПРАВКА")
         status = TextView(this).apply {
-            text = "Сборка 0.4.0\nVPN-туннель: не подключён\nАвтоматическое восстановление: в разработке"
+            text = "Сборка 0.5.0\nVPN-туннель: не подключён\nАвтоматическое восстановление: в разработке"
             textSize = 16f
             setTextColor(Color.WHITE)
             gravity = Gravity.CENTER
@@ -258,6 +258,90 @@ class MainActivity : Activity() {
                         (e.message ?: "Сервис WARP сейчас недоступен.") +
                             "\n\nПроверьте интернет и попробуйте ещё раз. Генератор — сторонний бесплатный сервис, его доступность не гарантируется."
                     )
+                }
+            } finally {
+                connection?.disconnect()
+            }
+        }.start()
+    }
+
+
+    /**
+     * Searches the public web for VPN providers independently of the WARP profile generator.
+     * Selecting a result opens its website; Android/provider pages may require user confirmation
+     * before installing an app. This does not replace profile import or the local WARP flow.
+     */
+    private fun searchVpnServices() {
+        status.text = "Поиск VPN-сервисов в интернете…"
+        val loading = AlertDialog.Builder(this)
+            .setTitle("Поиск VPN-сервисов")
+            .setMessage("Ищу публичные страницы VPN-сервисов…")
+            .setNegativeButton("Отмена", null)
+            .create()
+        loading.show()
+        Thread {
+            var connection: java.net.HttpURLConnection? = null
+            try {
+                val searchUrl = java.net.URL(
+                    "https://html.duckduckgo.com/html/?q=" +
+                        java.net.URLEncoder.encode("free VPN service official WireGuard Android", "UTF-8")
+                )
+                connection = (searchUrl.openConnection() as java.net.HttpURLConnection).apply {
+                    requestMethod = "GET"
+                    connectTimeout = 12000
+                    readTimeout = 15000
+                    setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 15) AppleWebKit/537.36 Chrome/130 Mobile Safari/537.36")
+                    setRequestProperty("Accept", "text/html")
+                    instanceFollowRedirects = true
+                }
+                val code = connection.responseCode
+                require(code in 200..299) { "Поисковый сайт ответил HTTP $code." }
+                val html = connection.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
+                require(html.length <= 3_000_000) { "Ответ поиска слишком большой." }
+                val pattern = Regex("""class="result__a"[^>]*href="([^"]+)"[^>]*>(.*?)</a>""", RegexOption.IGNORE_CASE)
+                val results = pattern.findAll(html).mapNotNull { match ->
+                    val rawHref = match.groupValues[1].replace("&amp;", "&")
+                    val href = try {
+                        val parsed = Uri.parse(rawHref)
+                        parsed.getQueryParameter("uddg") ?: rawHref
+                    } catch (_: Exception) { rawHref }
+                    val title = match.groupValues[2]
+                        .replace(Regex("<[^>]+>"), "")
+                        .replace("&amp;", "&").replace("&quot;", "\"")
+                        .replace("&#x27;", "'").replace("&lt;", "<").replace("&gt;", ">")
+                        .trim()
+                    if (title.isNotBlank() && (href.startsWith("https://") || href.startsWith("http://")) &&
+                        !href.contains("duckduckgo.com")) title to href else null
+                }.distinctBy { it.second }.take(8).toList()
+                runOnUiThread {
+                    if (isFinishing || isDestroyed) return@runOnUiThread
+                    loading.dismiss()
+                    if (results.isEmpty()) {
+                        status.text = "Поиск VPN-сервисов не дал результатов"
+                        showError("Ничего не найдено", "Поисковик не вернул список. Попробуйте позже или используйте «Импортировать профиль VPN» / «Вставить конфигурацию WARP / VPN».")
+                    } else {
+                        status.text = "Найдено VPN-сервисов: ${results.size}\nВыберите сайт для просмотра и установки."
+                        AlertDialog.Builder(this)
+                            .setTitle("Найденные VPN-сервисы")
+                            .setItems(results.map { it.first }.toTypedArray()) { _, which ->
+                                val selected = Uri.parse(results[which].second)
+                                try {
+                                    startActivity(Intent(Intent.ACTION_VIEW, selected))
+                                } catch (e: Exception) {
+                                    showError("Не удалось открыть сайт", e.message ?: "На телефоне нет приложения для открытия ссылок.")
+                                }
+                            }
+                            .setNegativeButton("Закрыть", null)
+                            .show()
+                    }
+                }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    if (isFinishing || isDestroyed) return@runOnUiThread
+                    loading.dismiss()
+                    status.text = "Поиск VPN-сервисов не выполнен"
+                    showError("Ошибка поиска", (e.message ?: "Поисковый сервис сейчас недоступен.") +
+                        "\n\nЭто отдельный поиск по интернету; загрузка профиля WARP и ручная вставка остаются независимыми.")
                 }
             } finally {
                 connection?.disconnect()
