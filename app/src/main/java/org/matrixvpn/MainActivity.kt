@@ -150,7 +150,6 @@ class MainActivity : Activity() {
             button.textSize = 14f
             button.minHeight = (48 * resources.displayMetrics.density).toInt()
         }
-        endpointList.setTextColor(Color.rgb(170, 220, 180))
         help.setTextColor(Color.rgb(170, 220, 180))
         setContentView(MatrixRainView(this))
         window.decorView.postDelayed({
@@ -159,7 +158,6 @@ class MainActivity : Activity() {
         networkWatcher = NetworkWatcher(this) { state ->
             runOnUiThread { networkStatus.text = state.summary() }
         }
-        refreshEndpointList()
     }
 
     override fun onStart() {
