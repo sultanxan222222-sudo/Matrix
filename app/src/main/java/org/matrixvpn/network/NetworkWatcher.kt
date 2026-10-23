@@ -19,9 +19,9 @@ class NetworkWatcher(
         val validatedInternet: Boolean
     ) {
         fun summary(): String {
-            if (!connected) return "Network: disconnected"
-            val route = if (validatedInternet) "internet validated" else "internet not validated"
-            return "Network: ${transports.ifEmpty { setOf("unknown") }.joinToString("/")}, $route"
+            if (!connected) return "Сеть: нет подключения"
+            val route = if (validatedInternet) "интернет доступен" else "доступ в интернет не подтверждён"
+            return "Сеть: ${transports.ifEmpty { setOf("неизвестно") }.joinToString("/")}, $route"
         }
     }
 
@@ -71,8 +71,8 @@ class NetworkWatcher(
     private fun publish(capabilities: NetworkCapabilities) {
         val transports = buildSet {
             if (capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) add("Wi-Fi")
-            if (capabilities.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)) add("mobile")
-            if (capabilities.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)) add("Ethernet")
+            if (capabilities.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)) add("мобильная сеть")
+            if (capabilities.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)) add("проводная сеть")
             if (capabilities.hasTransport(NetworkCapabilities.TRANSPORT_VPN)) add("VPN")
             if (capabilities.hasTransport(NetworkCapabilities.TRANSPORT_BLUETOOTH)) add("Bluetooth")
         }
