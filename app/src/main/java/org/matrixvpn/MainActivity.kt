@@ -3,6 +3,7 @@ package org.matrixvpn
 import android.app.Activity
 import android.app.AlertDialog
 import android.content.Intent
+import android.content.ClipboardManager
 import android.content.res.ColorStateList
 import android.graphics.Color
 import android.net.VpnService
@@ -102,20 +103,20 @@ class MainActivity : Activity() {
             setOnClickListener { showAddEndpointDialog() }
         }
         val importButton = Button(this).apply {
-            text = "Импортировать профиль VPN"
+            text = "2. Импорт файла с телефона"
             setOnClickListener { chooseVpnProfile() }
         }
         val findWireGuardButton = Button(this).apply {
-            text = "Найти и настроить бесплатный WARP"
+            text = "WARP — отдельный режим"
             setOnClickListener { fetchFreeWarpProfile() }
         }
         val findVpnButton = Button(this).apply {
-            text = "Найти VPN-сервисы в интернете"
+            text = "3. Найти бесплатные VPN-серверы"
             setOnClickListener { searchVpnServices() }
         }
         val pasteButton = Button(this).apply {
-            text = "Вставить конфигурацию WARP / VPN"
-            setOnClickListener { showPasteProfileDialog() }
+            text = "1. Импорт из буфера телефона"
+            setOnClickListener { importFromClipboard() }
         }
         connectButton = Button(this).apply {
             text = "Подключить VPN"
@@ -127,7 +128,7 @@ class MainActivity : Activity() {
             setPadding(12, 12, 12, 12)
         }
         val help = TextView(this).apply {
-            text = "Здесь можно подключать профили WireGuard и AmneziaWG (AWG), в том числе совместимые конфигурации из генератора WARP. Для подключения Android запросит разрешение. Файлы OpenVPN можно распознать, но для подключения нужен отдельный модуль OpenVPN. Один адрес сервера не заменяет полный профиль. После запуска проверяется доступ в интернет."
+            text = "Импортируйте конфигурацию из буфера или файл с телефона. WARP работает отдельно. Пункт бесплатных серверов получает актуальный каталог VPN Gate и передаёт OpenVPN-профиль совместимому приложению; встроенное подключение MATRIX пока поддерживает WireGuard/AmneziaWG. Бесплатные серверы добровольцев не гарантируют доступность и конфиденциальность."
             textSize = 13f
             gravity = Gravity.CENTER
             setPadding(8, 12, 8, 12)
@@ -267,71 +268,73 @@ class MainActivity : Activity() {
 
 
     /**
-     * Searches the public web for VPN providers independently of the WARP profile generator.
-     * Selecting a result opens its website; Android/provider pages may require user confirmation
-     * before installing an app. This does not replace profile import or the local WARP flow.
+     * Loads the public VPN Gate relay directory. These are real volunteer-run VPN servers,
+     * not WARP profiles. VPN Gate publishes OpenVPN client configs; MATRIX currently uses
+     * WireGuard/AWG internally, so selected OpenVPN profiles are handed to a compatible
+     * external VPN app instead of being falsely treated as WireGuard configs.
      */
     private fun searchVpnServices() {
-        status.text = "Поиск VPN-сервисов в интернете…"
+        status.text = "Поиск бесплатных VPN-серверов…"
+        connectButton.isEnabled = wireGuardConfig != null
         val loading = AlertDialog.Builder(this)
-            .setTitle("Поиск VPN-сервисов")
-            .setMessage("Ищу публичные страницы VPN-сервисов…")
+            .setTitle("Бесплатные VPN-серверы")
+            .setMessage("Загружаю список VPN Gate. Серверы предоставлены добровольцами; доступность и доверие к ним не гарантируются.")
             .setNegativeButton("Отмена", null)
             .create()
         loading.show()
         Thread {
             var connection: java.net.HttpURLConnection? = null
             try {
-                val searchUrl = java.net.URL(
-                    "https://html.duckduckgo.com/html/?q=" +
-                        java.net.URLEncoder.encode("free VPN service official WireGuard Android", "UTF-8")
-                )
-                connection = (searchUrl.openConnection() as java.net.HttpURLConnection).apply {
+                connection = (java.net.URL("https://www.vpngate.net/api/iphone/").openConnection() as java.net.HttpURLConnection).apply {
                     requestMethod = "GET"
-                    connectTimeout = 12000
-                    readTimeout = 15000
-                    setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 15) AppleWebKit/537.36 Chrome/130 Mobile Safari/537.36")
-                    setRequestProperty("Accept", "text/html")
+                    connectTimeout = 15000
+                    readTimeout = 20000
+                    setRequestProperty("User-Agent", "MATRIX-VPN-Android/0.5.1")
+                    setRequestProperty("Accept", "text/csv,text/plain,*/*")
                     instanceFollowRedirects = true
                 }
                 val code = connection.responseCode
-                require(code in 200..299) { "Поисковый сайт ответил HTTP $code." }
-                val html = connection.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
-                require(html.length <= 3_000_000) { "Ответ поиска слишком большой." }
-                val pattern = Regex("""class="result__a"[^>]*href="([^"]+)"[^>]*>(.*?)</a>""", RegexOption.IGNORE_CASE)
-                val results = pattern.findAll(html).mapNotNull { match ->
-                    val rawHref = match.groupValues[1].replace("&amp;", "&")
-                    val href = try {
-                        val parsed = Uri.parse(rawHref)
-                        parsed.getQueryParameter("uddg") ?: rawHref
-                    } catch (_: Exception) { rawHref }
-                    val title = match.groupValues[2]
-                        .replace(Regex("<[^>]+>"), "")
-                        .replace("&amp;", "&").replace("&quot;", "\"")
-                        .replace("&#x27;", "'").replace("&lt;", "<").replace("&gt;", ">")
-                        .trim()
-                    if (title.isNotBlank() && (href.startsWith("https://") || href.startsWith("http://")) &&
-                        !href.contains("duckduckgo.com")) title to href else null
-                }.distinctBy { it.second }.take(8).toList()
+                require(code in 200..299) { "Каталог VPN Gate ответил HTTP $code." }
+                val csv = connection.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
+                require(csv.length <= 20_000_000) { "Ответ каталога слишком большой." }
+                val lines = csv.lineSequence().filter { it.isNotBlank() && !it.startsWith("*") }.toList()
+                val headerIndex = lines.indexOfFirst { it.trimStart('#').startsWith("HostName,IP,Score,Ping,Speed,CountryLong", ignoreCase = true) }
+                require(headerIndex >= 0) { "Каталог вернул неизвестный формат." }
+                val servers = lines.drop(headerIndex + 1).mapNotNull { line ->
+                    val fields = parseCsvLine(line)
+                    if (fields.size < 15) return@mapNotNull null
+                    val host = fields[0].trim()
+                    val ip = fields[1].trim()
+                    val score = fields[2].toLongOrNull() ?: 0L
+                    val ping = fields[3].toLongOrNull() ?: -1L
+                    val speed = fields[4].toLongOrNull() ?: 0L
+                    val country = fields[5].trim().ifBlank { fields[6].trim().ifBlank { "Неизвестная страна" } }
+                    val sessions = fields[7].toIntOrNull() ?: 0
+                    val config = fields[14].trim()
+                    if (host.isBlank() || ip.isBlank() || config.isBlank()) null
+                    else VpnGateServer(host, ip, country, ping, speed, sessions, score, config)
+                }.sortedWith(compareByDescending<VpnGateServer> { it.score }.thenBy { if (it.ping < 0) Long.MAX_VALUE else it.ping }).take(30)
                 runOnUiThread {
                     if (isFinishing || isDestroyed) return@runOnUiThread
                     loading.dismiss()
-                    if (results.isEmpty()) {
-                        status.text = "Поиск VPN-сервисов не дал результатов"
-                        showError("Ничего не найдено", "Поисковик не вернул список. Попробуйте позже или используйте «Импортировать профиль VPN» / «Вставить конфигурацию WARP / VPN».")
+                    if (servers.isEmpty()) {
+                        status.text = "Список бесплатных VPN-серверов пуст"
+                        showError("Серверы не найдены", "VPN Gate не вернул доступных конфигураций. Попробуйте позже.")
                     } else {
-                        status.text = "Найдено VPN-сервисов: ${results.size}\nВыберите сайт для просмотра и установки."
+                        status.text = "Найдено бесплатных VPN-серверов: ${servers.size}\nИсточник: VPN Gate (добровольческие серверы)"
+                        val labels = servers.map { server ->
+                            val pingLabel = if (server.ping >= 0) "${server.ping} мс" else "ping неизвестен"
+                            val speedLabel = if (server.speed > 0) " • ${server.speed / 1_000_000} Мбит/с" else ""
+                            "${server.country} • ${server.host}\n$pingLabel • сессий: ${server.sessions}$speedLabel"
+                        }.toTypedArray()
                         AlertDialog.Builder(this)
-                            .setTitle("Найденные VPN-сервисы")
-                            .setItems(results.map { it.first }.toTypedArray()) { _, which ->
-                                val selected = Uri.parse(results[which].second)
-                                try {
-                                    startActivity(Intent(Intent.ACTION_VIEW, selected))
-                                } catch (e: Exception) {
-                                    showError("Не удалось открыть сайт", e.message ?: "На телефоне нет приложения для открытия ссылок.")
-                                }
-                            }
+                            .setTitle("Бесплатные VPN-серверы (VPN Gate)")
+                            .setItems(labels) { _, which -> offerVpnGateProfile(servers[which]) }
                             .setNegativeButton("Закрыть", null)
+                            .setNeutralButton("О VPN Gate") { _, _ ->
+                                try { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.vpngate.net/"))) }
+                                catch (_: Exception) { showError("Не удалось открыть сайт", "Откройте https://www.vpngate.net/ вручную.") }
+                            }
                             .show()
                     }
                 }
@@ -339,14 +342,105 @@ class MainActivity : Activity() {
                 runOnUiThread {
                     if (isFinishing || isDestroyed) return@runOnUiThread
                     loading.dismiss()
-                    status.text = "Поиск VPN-сервисов не выполнен"
-                    showError("Ошибка поиска", (e.message ?: "Поисковый сервис сейчас недоступен.") +
-                        "\n\nЭто отдельный поиск по интернету; загрузка профиля WARP и ручная вставка остаются независимыми.")
+                    status.text = "Поиск бесплатных VPN-серверов не выполнен"
+                    showError("Ошибка поиска серверов", (e.message ?: "VPN Gate сейчас недоступен.") + "\n\nПопробуйте позже. WARP и ручной импорт работают отдельно.")
                 }
             } finally {
                 connection?.disconnect()
             }
         }.start()
+    }
+
+    private data class VpnGateServer(
+        val host: String,
+        val ip: String,
+        val country: String,
+        val ping: Long,
+        val speed: Long,
+        val sessions: Int,
+        val score: Long,
+        val openVpnConfigBase64: String
+    )
+
+    private fun parseCsvLine(line: String): List<String> {
+        val fields = mutableListOf<String>()
+        val field = StringBuilder()
+        var quoted = false
+        var index = 0
+        while (index < line.length) {
+            val ch = line[index]
+            when {
+                ch == '"' && quoted && index + 1 < line.length && line[index + 1] == '"' -> {
+                    field.append('"')
+                    index++
+                }
+                ch == '"' -> quoted = !quoted
+                ch == ',' && !quoted -> {
+                    fields.add(field.toString())
+                    field.setLength(0)
+                }
+                else -> field.append(ch)
+            }
+            index++
+        }
+        fields.add(field.toString())
+        return fields
+    }
+
+    private fun offerVpnGateProfile(server: VpnGateServer) {
+        AlertDialog.Builder(this)
+            .setTitle("Бесплатный сервер: ${server.country}")
+            .setMessage(
+                "Сервер: ${server.host} (${server.ip})\n\n" +
+                "Это реальный бесплатный VPN-сервер VPN Gate, не WARP. Каталог предоставляет профиль OpenVPN. " +
+                "Встроенный движок MATRIX сейчас поддерживает WireGuard/AmneziaWG, поэтому для подключения этого сервера нужен совместимый внешний OpenVPN-клиент. " +
+                "Профиль будет передан через системное меню Android. Бесплатные серверы управляются добровольцами; не используйте их для конфиденциальных данных."
+            )
+            .setNegativeButton("Отмена", null)
+            .setPositiveButton("Получить профиль") { _, _ -> shareVpnGateProfile(server) }
+            .show()
+    }
+
+    private fun shareVpnGateProfile(server: VpnGateServer) {
+        try {
+            val decoded = android.util.Base64.decode(server.openVpnConfigBase64, android.util.Base64.DEFAULT)
+            val profileText = String(decoded, Charsets.UTF_8)
+            require(profileText.contains("client", ignoreCase = true) && profileText.contains("remote", ignoreCase = true)) {
+                "Каталог вернул недопустимый OpenVPN-профиль."
+            }
+            val safeHost = server.host.replace(Regex("[^A-Za-z0-9._-]"), "_")
+            val outDir = java.io.File(cacheDir, "vpn-gate").apply { mkdirs() }
+            val file = java.io.File(outDir, "vpngate-$safeHost.ovpn")
+            file.writeText(profileText, Charsets.UTF_8)
+            val uri = androidx.core.content.FileProvider.getUriForFile(this, "${packageName}.fileprovider", file)
+            val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                type = "application/x-openvpn-profile"
+                putExtra(Intent.EXTRA_STREAM, uri)
+                putExtra(Intent.EXTRA_SUBJECT, "VPN Gate profile - ${server.country}")
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                clipData = android.content.ClipData.newUri(contentResolver, file.name, uri)
+            }
+            startActivity(Intent.createChooser(shareIntent, "Открыть профиль в OpenVPN-клиенте"))
+        } catch (e: Exception) {
+            showError("Не удалось подготовить профиль", e.message ?: "Профиль сервера не удалось прочитать.")
+        }
+    }
+
+    private fun importFromClipboard() {
+        try {
+            val clipboard = getSystemService(CLIPBOARD_SERVICE) as ClipboardManager
+            val clip = clipboard.primaryClip
+            val text = if (clipboard.hasPrimaryClip() && clip != null && clip.itemCount > 0) {
+                clip.getItemAt(0).coerceToText(this)?.toString().orEmpty()
+            } else ""
+            if (text.isBlank()) {
+                showPasteProfileDialog()
+                return
+            }
+            processProfileText(text)
+        } catch (e: Exception) {
+            showError("Не удалось прочитать буфер телефона", e.message ?: "Скопируйте полный профиль и повторите попытку.")
+        }
     }
 
     private fun showAddEndpointDialog() {
