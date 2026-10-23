@@ -115,7 +115,7 @@ class MainActivity : Activity() {
             gravity = Gravity.CENTER
             setPadding(8, 12, 8, 12)
         }
-        setContentView(LinearLayout(this).apply {
+        val mainScreen = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
             setPadding(20, 20, 20, 20)
@@ -130,7 +130,11 @@ class MainActivity : Activity() {
             addView(pasteButton, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
             addView(connectButton, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
             addView(help)
-        })
+        }
+        setContentView(MatrixRainView(this))
+        window.decorView.postDelayed({
+            setContentView(mainScreen)
+        }, 1800L)
         networkWatcher = NetworkWatcher(this) { state ->
             runOnUiThread { networkStatus.text = state.summary() }
         }
