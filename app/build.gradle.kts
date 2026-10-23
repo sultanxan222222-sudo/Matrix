@@ -9,8 +9,8 @@ android {
         applicationId = "org.matrixvpn"
         minSdk = 26
         targetSdk = 35
-        versionCode = 5
-        versionName = "0.5.0"
+        versionCode = 6
+        versionName = "0.5.1"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     compileOptions {
@@ -21,6 +21,7 @@ android {
     kotlinOptions { jvmTarget = "17" }
 }
 dependencies {
+    implementation("androidx.core:core-ktx:1.15.0")
     // Embeddable AmneziaWG tunnel library; supports AWG configuration extensions
     // while retaining the WireGuard Android backend/config API used by MATRIX.
     implementation("com.zaneschepke:amneziawg-android:2.3.7")
