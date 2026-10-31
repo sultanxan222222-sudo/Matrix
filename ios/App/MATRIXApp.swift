@@ -195,7 +195,17 @@ struct ContentView: View {
             let manager = managers?.first(where: {
                 ($0.protocolConfiguration as? NETunnelProviderProtocol)?.providerBundleIdentifier == "org.matrixvpn.ios.PacketTunnel"
             })
-            DispatchQueue.main.async { tunnelManager = manager }
+            DispatchQueue.main.async {
+                tunnelManager = manager
+                if let rawID = (manager?.protocolConfiguration as? NETunnelProviderProtocol)?
+                    .providerConfiguration?["MATRIXProfileID"] as? String,
+                   let identifier = UUID(uuidString: rawID) {
+                    profileIdentifier = identifier
+                    profileName = "Сохранённый профиль MATRIX"
+                    detectedKind = .wireGuard
+                    status = "Профиль готов. Состояние VPN будет обновлено."
+                }
+            }
         }
     }
 
