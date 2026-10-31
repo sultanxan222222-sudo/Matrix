@@ -1,0 +1,69 @@
+name: MATRIX
+options:
+  deploymentTarget:
+    iOS: "16.0"
+  bundleIdPrefix: org.matrixvpn
+settings:
+  base:
+    SWIFT_VERSION: "5.9"
+    IPHONEOS_DEPLOYMENT_TARGET: "16.0"
+    TARGETED_DEVICE_FAMILY: "1"
+targets:
+  MATRIXCore:
+    type: framework
+    platform: iOS
+    sources:
+      - path: MATRIXCore/Sources
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: org.matrixvpn.ios.core
+  MATRIXApp:
+    type: application
+    platform: iOS
+    sources:
+      - path: App
+    dependencies:
+      - target: MATRIXCore
+      - target: MATRIXPacketTunnel
+        embed: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: org.matrixvpn.ios
+        INFOPLIST_KEY_CFBundleDisplayName: MATRIX VPN
+        INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.utilities
+        GENERATE_INFOPLIST_FILE: YES
+        CODE_SIGN_ENTITLEMENTS: App/MATRIXApp.entitlements
+  MATRIXPacketTunnel:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: PacketTunnel
+    dependencies:
+      - target: MATRIXCore
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: org.matrixvpn.ios.PacketTunnel
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_NSExtension_NSExtensionPointIdentifier: com.apple.networkextension.packet-tunnel
+        INFOPLIST_KEY_NSExtension_NSExtensionPrincipalClass: "$(PRODUCT_MODULE_NAME).PacketTunnelProvider"
+        CODE_SIGN_ENTITLEMENTS: PacketTunnel/PacketTunnel.entitlements
+  MATRIXCoreTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: MATRIXCore/Tests
+    dependencies:
+      - target: MATRIXCore
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: org.matrixvpn.ios.coretests
+        GENERATE_INFOPLIST_FILE: YES
+schemes:
+  MATRIX:
+    build:
+      targets:
+        MATRIXApp: all
+        MATRIXCoreTests: [test]
+    test:
+      targets:
+        - MATRIXCoreTests
