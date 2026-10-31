@@ -50,7 +50,7 @@ targets:
       - name: Build AmneziaWG Go backend
         script: |
           set -euo pipefail
-          PACKAGE_DIR="${BUILD_DIR%Build/*}SourcePackages/checkouts/amneziawg-apple"
+          PACKAGE_DIR="$PROJECT_DIR/build/SourcePackages/checkouts/amneziawg-apple"
           if [ ! -f "$PACKAGE_DIR/Sources/WireGuardKitGo/Makefile" ]; then
             echo "error: AmneziaWG package checkout not found at $PACKAGE_DIR"
             exit 1
