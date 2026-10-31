@@ -61,6 +61,12 @@ targets:
             CONFIGURATION_BUILD_DIR="$PACKAGE_DIR/Sources/WireGuardKitGo/out" \
             CONFIGURATION_TEMP_DIR="$DERIVED_FILE_DIR/amneziawg-go"
           test -s "$PACKAGE_DIR/Sources/WireGuardKitGo/out/libwg-go.a"
+          # SwiftPM's unsafe linker flag is relative to PROJECT_DIR in XcodeGen builds.
+          # Stage the verified archive at that exact relative search path.
+          LINK_DIR="$PROJECT_DIR/Sources/WireGuardKitGo/out"
+          mkdir -p "$LINK_DIR"
+          cp "$PACKAGE_DIR/Sources/WireGuardKitGo/out/libwg-go.a" "$LINK_DIR/libwg-go.a"
+          test -s "$LINK_DIR/libwg-go.a"
         basedOnDependencyAnalysis: false
     settings:
       base:
