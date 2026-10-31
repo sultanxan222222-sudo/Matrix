@@ -14,6 +14,11 @@ final class ProfileInspectorTests: XCTestCase {
         XCTAssertEqual(MATRIXProfileInspector.inspect(text).kind, .amneziaWG)
     }
 
+    func testRecognizesExtendedAmneziaParameters() {
+        let text = "[Interface]\nPrivateKey = hidden\nI5 = custom\n[Peer]\nPublicKey = peer"
+        XCTAssertEqual(MATRIXProfileInspector.inspect(text).kind, .amneziaWG)
+    }
+
     func testRecognizesOpenVPNProfile() {
         XCTAssertEqual(MATRIXProfileInspector.inspect("client\nremote vpn.example 1194").kind, .openVPN)
     }
@@ -26,6 +31,11 @@ final class ProfileInspectorTests: XCTestCase {
     func testEmptyPrivateKeyIsNotReportedAsPresent() {
         let text = "[Interface]\nPrivateKey =   \n[Peer]\nPublicKey = peer"
         XCTAssertFalse(MATRIXProfileInspector.inspect(text).hasPrivateKey)
+    }
+
+    func testRejectsOversizedAndBinaryLikeText() {
+        XCTAssertEqual(MATRIXProfileInspector.inspect(String(repeating: "x", count: 2_000_001)).kind, .unknown)
+        XCTAssertEqual(MATRIXProfileInspector.inspect("abc\u{0000}def").kind, .unknown)
     }
 
     func testUnknownTextDoesNotBecomeAProfile() {
