@@ -22,8 +22,12 @@ public struct MATRIXProfileInspection: Equatable {
 }
 
 public enum MATRIXProfileInspector {
-    /// Inspects configuration structure only. Never returns or logs key material.
+    /// Inspects format and structure only. Never returns or logs key material.
     public static func inspect(_ text: String) -> MATRIXProfileInspection {
+        guard !text.isEmpty, text.utf8.count <= 2_000_000, !text.contains("\u{0000}") else {
+            return MATRIXProfileInspection(kind: .unknown, hasInterfaceSection: false, hasPeerSection: false, hasPrivateKey: false)
+        }
+
         let lines = text.components(separatedBy: .newlines).map {
             $0.trimmingCharacters(in: .whitespacesAndNewlines)
         }
@@ -40,16 +44,23 @@ public enum MATRIXProfileInspector {
         let hasInterface = normalized.contains("[interface]")
         let hasPeer = normalized.contains("[peer]")
         let hasPrivateKey = normalized.contains(where: {
-            $0.hasPrefix("privatekey") && $0.split(separator: "=", maxSplits: 1).count == 2
-                && !$0.split(separator: "=", maxSplits: 1)[1].trimmingCharacters(in: .whitespaces).isEmpty
+            guard let separator = $0.firstIndex(of: "=") else { return false }
+            return $0[..<separator].trimmingCharacters(in: .whitespaces) == "privatekey"
+                && !$0[$0.index(after: separator)...].trimmingCharacters(in: .whitespaces).isEmpty
         })
 
-        // AmneziaWG parameters may be placed in either Interface or Peer.
-        // Match keys rather than exact spacing so tabs and compact formatting work.
-        let amneziaKeys: Set<String> = ["jc", "jmin", "jmax", "s1", "s2", "h1", "h2", "h3", "h4"]
+        // These markers are supported by the pinned AmneziaWG Apple parser/engine.
+        let amneziaKeys: Set<String> = [
+            "jc", "jmin", "jmax", "s1", "s2", "s3", "s4",
+            "h1", "h2", "h3", "h4", "i1", "i2", "i3", "i4", "i5",
+            "headerprotectionkey", "contentpaddingaddition",
+            "rekeyaftertime", "rekeytimeout", "rejectaftertime",
+            "keepalivetimeout", "maxhandshakeattempts", "randomtrailers", "disablecookies"
+        ]
         let isAmnezia = normalized.contains { line in
-            guard let key = line.split(separator: "=", maxSplits: 1).first else { return false }
-            return amneziaKeys.contains(key.trimmingCharacters(in: .whitespaces))
+            guard let separator = line.firstIndex(of: "=") else { return false }
+            let key = line[..<separator].trimmingCharacters(in: .whitespaces)
+            return amneziaKeys.contains(key)
         }
 
         let kind: MATRIXProfileKind = hasInterface && hasPeer
