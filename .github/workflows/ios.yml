@@ -13,6 +13,10 @@ jobs:
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
+      - name: Install Go toolchain
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.26.x'
       - name: Install XcodeGen
         run: brew install xcodegen
       - name: Generate Xcode project
@@ -27,6 +31,10 @@ jobs:
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
+      - name: Install Go toolchain
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.26.x'
       - name: Install XcodeGen
         run: brew install xcodegen
       - name: Generate Xcode project
