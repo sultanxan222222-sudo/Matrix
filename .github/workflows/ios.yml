@@ -1,0 +1,50 @@
+name: iOS parallel evaluation
+on:
+  push:
+    branches: [ios/parallel-evaluation]
+  pull_request:
+    branches: [fix/import-and-free-vpn-discovery]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  app-shell:
+    name: Track 1 — native SwiftUI app
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Generate Xcode project
+        working-directory: ios
+        run: xcodegen generate
+      - name: Compile iOS app for simulator
+        working-directory: ios
+        run: xcodebuild -project MATRIX.xcodeproj -scheme MATRIX -sdk iphonesimulator -configuration Debug CODE_SIGNING_ALLOWED=NO build
+
+  tunnel-extension:
+    name: Track 2 — Network Extension integration boundary
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Generate Xcode project
+        working-directory: ios
+        run: xcodegen generate
+      - name: Compile packet tunnel extension
+        working-directory: ios
+        run: xcodebuild -project MATRIX.xcodeproj -scheme MATRIX -sdk iphonesimulator -configuration Debug CODE_SIGNING_ALLOWED=NO build
+
+  shared-core-tests:
+    name: Track 3 — shared profile parsing and tests
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Generate Xcode project
+        run: |
+          brew install xcodegen
+          cd ios && xcodegen generate
+      - name: Run iOS core unit tests
+        working-directory: ios
+        run: xcodebuild -project MATRIX.xcodeproj -scheme MATRIX -destination 'platform=iOS Simulator,name=iPhone 16' CODE_SIGNING_ALLOWED=NO test
