@@ -44,7 +44,6 @@ jobs:
       - name: Install XcodeGen
         run: brew install xcodegen
       - name: Generate Xcode project
-        working-directory: ios
         run: cd ios && xcodegen generate
       - name: Install an iOS Simulator runtime
         run: xcodebuild -downloadPlatform iOS
