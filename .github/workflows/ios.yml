@@ -49,3 +49,24 @@ jobs:
       - name: Compile unit tests without downloading simulator runtimes
         working-directory: ios
         run: xcodebuild -project MATRIX.xcodeproj -scheme MATRIX -sdk iphonesimulator -configuration Debug CODE_SIGNING_ALLOWED=NO build-for-testing
+
+  amnezia-engine-build:
+    name: Track 4 — AmneziaWG Apple engine build proof
+    runs-on: macos-15
+    steps:
+      - name: Check out pinned AmneziaWG Apple engine
+        uses: actions/checkout@v4
+        with:
+          repository: amnezia-vpn/amneziawg-apple
+          ref: 9d5ee60edefa95b933a738dd7cda671dd18021fc
+          path: vendor/amneziawg-apple
+      - name: Install Go toolchain
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.26.x'
+      - name: Build iOS arm64 tunnel backend
+        working-directory: vendor/amneziawg-apple/Sources/WireGuardKitGo
+        run: |
+          make build PLATFORM_NAME=iphoneos ARCHS=arm64 SDKROOT="$(xcrun --sdk iphoneos --show-sdk-path)" CONFIGURATION_BUILD_DIR="$GITHUB_WORKSPACE/engine-out" CONFIGURATION_TEMP_DIR="$RUNNER_TEMP/amneziawg-build"
+          test -s "$GITHUB_WORKSPACE/engine-out/libwg-go.a"
+          file "$GITHUB_WORKSPACE/engine-out/libwg-go.a"
