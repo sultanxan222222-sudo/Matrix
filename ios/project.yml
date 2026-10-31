@@ -50,11 +50,22 @@ targets:
       - name: Build AmneziaWG Go backend
         script: |
           set -euo pipefail
-          PACKAGE_DIR="$PROJECT_DIR/build/SourcePackages/checkouts/amneziawg-apple"
-          if [ ! -f "$PACKAGE_DIR/Sources/WireGuardKitGo/Makefile" ]; then
-            echo "error: AmneziaWG package checkout not found at $PACKAGE_DIR"
+          PACKAGE_DIR=""
+          for candidate in \
+            "$HOME/Library/Developer/Xcode/DerivedData"/*/SourcePackages/checkouts/amneziawg-apple \
+            "$PROJECT_DIR"/SourcePackages/checkouts/amneziawg-apple \
+            "$PROJECT_DIR"/build/SourcePackages/checkouts/amneziawg-apple; do
+            if [ -f "$candidate/Sources/WireGuardKitGo/Makefile" ]; then
+              PACKAGE_DIR="$candidate"
+              break
+            fi
+          done
+          if [ -z "$PACKAGE_DIR" ]; then
+            echo "error: AmneziaWG SwiftPM checkout not found in Xcode DerivedData"
+            find "$HOME/Library/Developer/Xcode/DerivedData" -maxdepth 7 -name Makefile -path '*/WireGuardKitGo/Makefile' -print || true
             exit 1
           fi
+          echo "Using AmneziaWG package at $PACKAGE_DIR"
           mkdir -p "$PACKAGE_DIR/Sources/WireGuardKitGo/out"
           make -C "$PACKAGE_DIR/Sources/WireGuardKitGo" build \
             PLATFORM_NAME=iphoneos ARCHS=arm64 SDKROOT="$(xcrun --sdk iphoneos --show-sdk-path)" \
