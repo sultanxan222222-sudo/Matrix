@@ -9,7 +9,7 @@ permissions:
   contents: read
 jobs:
   app-shell:
-    name: Track 1 — native SwiftUI app
+    name: Track 1 — native SwiftUI app and embedded tunnel
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
@@ -18,12 +18,12 @@ jobs:
       - name: Generate Xcode project
         working-directory: ios
         run: xcodegen generate
-      - name: Compile iOS app for simulator
+      - name: Compile app and packet tunnel for iPhone
         working-directory: ios
-        run: xcodebuild -project MATRIX.xcodeproj -scheme MATRIX -sdk iphonesimulator -configuration Debug CODE_SIGNING_ALLOWED=NO build
+        run: xcodebuild -project MATRIX.xcodeproj -scheme MATRIX -sdk iphoneos -destination 'generic/platform=iOS' -configuration Debug CODE_SIGNING_ALLOWED=NO build
 
   tunnel-extension:
-    name: Track 2 — Network Extension integration boundary
+    name: Track 2 — AmneziaWG-backed packet tunnel
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
@@ -32,9 +32,9 @@ jobs:
       - name: Generate Xcode project
         working-directory: ios
         run: xcodegen generate
-      - name: Compile packet tunnel extension
+      - name: Compile packet tunnel for iPhone
         working-directory: ios
-        run: xcodebuild -project MATRIX.xcodeproj -scheme MATRIX -sdk iphonesimulator -configuration Debug CODE_SIGNING_ALLOWED=NO build
+        run: xcodebuild -project MATRIX.xcodeproj -target MATRIXPacketTunnel -sdk iphoneos -destination 'generic/platform=iOS' -configuration Debug CODE_SIGNING_ALLOWED=NO build
 
   shared-core-tests:
     name: Track 3 — shared profile parsing and tests
@@ -46,9 +46,9 @@ jobs:
       - name: Generate Xcode project
         working-directory: ios
         run: xcodegen generate
-      - name: Compile unit tests without downloading simulator runtimes
+      - name: Compile shared core tests for simulator
         working-directory: ios
-        run: xcodebuild -project MATRIX.xcodeproj -scheme MATRIX -sdk iphonesimulator -configuration Debug CODE_SIGNING_ALLOWED=NO build-for-testing
+        run: xcodebuild -project MATRIX.xcodeproj -target MATRIXCoreTests -sdk iphonesimulator -configuration Debug CODE_SIGNING_ALLOWED=NO build
 
   amnezia-engine-build:
     name: Track 4 — AmneziaWG Apple engine build proof
