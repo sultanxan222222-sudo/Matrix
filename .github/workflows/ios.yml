@@ -41,10 +41,18 @@ jobs:
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
+      - name: Install XcodeGen
+        run: brew install xcodegen
       - name: Generate Xcode project
-        run: |
-          brew install xcodegen
-          cd ios && xcodegen generate
-      - name: Run iOS core unit tests
         working-directory: ios
-        run: xcodebuild -project MATRIX.xcodeproj -scheme MATRIX -destination 'platform=iOS Simulator,name=iPhone 16' CODE_SIGNING_ALLOWED=NO test
+        run: cd ios && xcodegen generate
+      - name: Install an iOS Simulator runtime
+        run: xcodebuild -downloadPlatform iOS
+      - name: Boot an available iPhone simulator and run tests
+        working-directory: ios
+        run: |
+          DEVICE_TYPE=$(xcrun simctl list -j devicetypes | python3 -c 'import json,sys; d=json.load(sys.stdin); print(next(x["identifier"] for x in d["devicetypes"] if x["name"] == "iPhone 16"))')
+          RUNTIME=$(xcrun simctl list -j runtimes | python3 -c 'import json,sys; d=json.load(sys.stdin); print(next(x["identifier"] for x in d["runtimes"] if x["name"].startswith("iOS") and x["isAvailable"]))')
+          UDID=$(xcrun simctl create MATRIX-iPhone "$DEVICE_TYPE" "$RUNTIME")
+          xcrun simctl boot "$UDID"
+          xcodebuild -project MATRIX.xcodeproj -scheme MATRIX -destination "platform=iOS Simulator,id=$UDID" CODE_SIGNING_ALLOWED=NO test
