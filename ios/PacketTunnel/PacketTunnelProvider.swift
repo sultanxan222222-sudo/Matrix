@@ -1,24 +1,26 @@
 import Foundation
 import NetworkExtension
 import WireGuardKit
+import MATRIXCore
 
 /// Packet tunnel backed by the AmneziaWG Apple WireGuardKit implementation.
 final class PacketTunnelProvider: NEPacketTunnelProvider {
     private lazy var adapter = WireGuardAdapter(with: self) { _, message in
-        // The upstream adapter emits operational messages; never log the raw profile or private keys.
+        // Never log the raw profile or private keys.
         NSLog("MATRIX VPN: %@", message)
     }
 
     override func startTunnel(options: [String: NSObject]?,
                               completionHandler: @escaping (Error?) -> Void) {
         guard let tunnelProtocol = protocolConfiguration as? NETunnelProviderProtocol,
-              let profile = tunnelProtocol.providerConfiguration?["WgQuickConfig"] as? String,
-              !profile.isEmpty else {
-            completionHandler(makeError(1001, "Не найдена сохранённая конфигурация VPN."))
+              let rawIdentifier = tunnelProtocol.providerConfiguration?["MATRIXProfileID"] as? String,
+              let identifier = UUID(uuidString: rawIdentifier) else {
+            completionHandler(makeError(1001, "Не найден идентификатор профиля MATRIX."))
             return
         }
 
         do {
+            let profile = try MATRIXProfileVault.load(identifier: identifier)
             let configuration = try TunnelConfiguration(fromWgQuickConfig: profile, called: "MATRIX")
             adapter.start(tunnelConfiguration: configuration) { error in
                 guard let error else {
@@ -28,7 +30,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
                 completionHandler(self.makeError(1002, "Не удалось запустить VPN: \(error)"))
             }
         } catch {
-            completionHandler(makeError(1003, "Некорректная конфигурация VPN: \(error.localizedDescription)"))
+            completionHandler(makeError(1003, "Не удалось загрузить конфигурацию VPN: \(error.localizedDescription)"))
         }
     }
 
