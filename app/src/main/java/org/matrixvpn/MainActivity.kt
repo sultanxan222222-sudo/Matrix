@@ -529,7 +529,7 @@ class MainActivity : Activity() {
                     reachableCount > 0 -> "Разведка: TCP доступны $reachableCount; UDP/непроверенных: $udpCount."
                     else -> "TCP-маршруты не подтверждены; UDP и непроверенные узлы остаются в очереди."
                 }
-                status.text = "VPN подключён через ${activeCaravanServer?.country ?: "OpenVPN"}\\n$message\\nОсновной туннель не переключался."
+                status.text = "VPN подключён через ${activeCaravanServer?.country ?: "OpenVPN"}\n$message\nОсновной туннель не переключался."
             }
         }.start()
     }
