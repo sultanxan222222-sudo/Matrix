@@ -180,13 +180,155 @@ class MainActivity : Activity() {
             button.minHeight = (48 * resources.displayMetrics.density).toInt()
         }
         help.setTextColor(Color.rgb(170, 220, 180))
-        setContentView(MatrixRainView(this))
-        window.decorView.postDelayed({
-            setContentView(mainScreen)
-        }, 1800L)
+        if (isTelevision()) {
+            title.text = "MATRIX"
+            title.textSize = 48f
+            title.gravity = Gravity.START
+            menuSubtitle.text = "CARAVAN • TV EDITION"
+            menuSubtitle.textSize = 16f
+            menuSubtitle.gravity = Gravity.START
+            connectionHeading.textSize = 15f
+            status.textSize = 22f
+            status.gravity = Gravity.START
+            networkStatus.textSize = 18f
+            networkStatus.gravity = Gravity.START
+            helpHeading.textSize = 15f
+            help.textSize = 16f
+            help.gravity = Gravity.START
+            listOf(connectButton, findVpnButton, findWireGuardButton, importButton, pasteButton).forEach { button ->
+                styleTvButton(button, button === connectButton)
+            }
+            setContentView(createTvScreen(
+                title, menuSubtitle, connectionHeading, status, networkStatus,
+                helpHeading, help, connectButton, findVpnButton,
+                findWireGuardButton, importButton, pasteButton
+            ))
+            connectButton.requestFocus()
+        } else {
+            setContentView(MatrixRainView(this))
+            window.decorView.postDelayed({
+                setContentView(mainScreen)
+            }, 1800L)
+        }
         networkWatcher = NetworkWatcher(this) { state ->
             runOnUiThread { networkStatus.text = state.summary() }
         }
+    }
+
+    private fun isTelevision(): Boolean {
+        val manager = packageManager
+        return manager.hasSystemFeature(android.content.pm.PackageManager.FEATURE_LEANBACK) ||
+            manager.hasSystemFeature(android.content.pm.PackageManager.FEATURE_TELEVISION) ||
+            !manager.hasSystemFeature(android.content.pm.PackageManager.FEATURE_TOUCHSCREEN)
+    }
+
+    private fun styleTvButton(button: Button, primary: Boolean) {
+        val density = resources.displayMetrics.density
+        button.isFocusable = true
+        button.isFocusableInTouchMode = true
+        button.isAllCaps = false
+        button.textSize = 19f
+        button.minHeight = (76f * density).toInt()
+        button.setPadding((22 * density).toInt(), (12 * density).toInt(),
+            (22 * density).toInt(), (12 * density).toInt())
+        button.setTextColor(Color.WHITE)
+        fun background(focused: Boolean): android.graphics.drawable.GradientDrawable =
+            android.graphics.drawable.GradientDrawable().apply {
+                shape = android.graphics.drawable.GradientDrawable.RECTANGLE
+                cornerRadius = 16f * density
+                setColor(when {
+                    focused -> Color.rgb(0, 116, 48)
+                    primary -> Color.rgb(0, 78, 32)
+                    else -> Color.rgb(17, 37, 24)
+                })
+                setStroke((if (focused) 3f else 1f) * density,
+                    if (focused) Color.rgb(0, 255, 96) else Color.rgb(48, 100, 65))
+            }
+        button.background = background(false)
+        button.setOnFocusChangeListener { view, hasFocus ->
+            (view as Button).background = background(hasFocus)
+        }
+    }
+
+    private fun createTvScreen(
+        title: TextView,
+        subtitle: TextView,
+        connectionHeading: TextView,
+        status: TextView,
+        networkStatus: TextView,
+        helpHeading: TextView,
+        help: TextView,
+        connect: Button,
+        findVpn: Button,
+        warp: Button,
+        importFile: Button,
+        paste: Button
+    ): android.view.View {
+        val density = resources.displayMetrics.density
+        fun dp(value: Int) = (value * density).toInt()
+        val root = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(48), dp(28), dp(48), dp(28))
+            setBackgroundColor(Color.rgb(3, 9, 6))
+            isFocusable = false
+        }
+        val left = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(30), dp(24), dp(30), dp(24))
+            background = android.graphics.drawable.GradientDrawable().apply {
+                shape = android.graphics.drawable.GradientDrawable.RECTANGLE
+                cornerRadius = dp(22).toFloat()
+                setColor(Color.rgb(7, 20, 12))
+                setStroke(dp(1), Color.rgb(27, 65, 39))
+            }
+        }
+        title.setTextColor(Color.rgb(0, 255, 82))
+        subtitle.setTextColor(Color.rgb(150, 220, 168))
+        connectionHeading.setTextColor(Color.rgb(0, 255, 82))
+        status.setTextColor(Color.WHITE)
+        networkStatus.setTextColor(Color.rgb(177, 210, 185))
+        helpHeading.setTextColor(Color.rgb(0, 255, 82))
+        help.setTextColor(Color.rgb(177, 210, 185))
+        left.addView(title)
+        left.addView(subtitle, LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+        ).apply { bottomMargin = dp(34) })
+        left.addView(connectionHeading)
+        left.addView(status, LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+        ).apply { topMargin = dp(12) })
+        left.addView(networkStatus, LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+        ).apply { topMargin = dp(14) })
+        left.addView(helpHeading, LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+        ).apply { topMargin = dp(28) })
+        left.addView(help, LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+        ).apply { topMargin = dp(8) })
+        val right = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+            setPadding(dp(34), dp(8), dp(12), dp(8))
+        }
+        val actionsTitle = TextView(this).apply {
+            text = "УПРАВЛЕНИЕ"
+            textSize = 18f
+            setTextColor(Color.rgb(0, 255, 82))
+            gravity = Gravity.START
+            setPadding(dp(8), 0, 0, dp(16))
+        }
+        right.addView(actionsTitle)
+        listOf(connect, findVpn, warp, importFile, paste).forEach { button ->
+            right.addView(button, LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(76)
+            ).apply { bottomMargin = dp(12) })
+        }
+        root.addView(left, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1.08f))
+        root.addView(right, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 0.92f))
+        return root
     }
 
     override fun onStart() {
