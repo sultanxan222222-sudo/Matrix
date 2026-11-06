@@ -14,3 +14,5 @@ dependencyResolutionManagement {
 }
 rootProject.name = "MATRIX-VPN"
 include(":app")
+include(":openvpnEngine")
+project(":openvpnEngine").projectDir = file("third_party/OpenGateVPN/vpnLib")
