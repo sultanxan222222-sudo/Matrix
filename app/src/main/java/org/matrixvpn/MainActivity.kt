@@ -198,6 +198,10 @@ class MainActivity : Activity() {
             listOf(connectButton, findVpnButton, findWireGuardButton, importButton, pasteButton).forEach { button ->
                 styleTvButton(button, button === connectButton)
             }
+            // The same widgets were first attached to the phone layout above.
+            // Detach them before reusing them in the TV layout; Android throws
+            // IllegalStateException if a View is added to a second parent.
+            menuContent.removeAllViews()
             setContentView(createTvScreen(
                 title, menuSubtitle, connectionHeading, status, networkStatus,
                 helpHeading, help, connectButton, findVpnButton,
