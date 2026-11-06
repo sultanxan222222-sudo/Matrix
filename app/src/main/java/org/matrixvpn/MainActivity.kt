@@ -203,7 +203,7 @@ class MainActivity : Activity() {
                 helpHeading, help, connectButton, findVpnButton,
                 findWireGuardButton, importButton, pasteButton
             ))
-            connectButton.requestFocus()
+            connectButton.post { connectButton.requestFocus() }
         } else {
             setContentView(MatrixRainView(this))
             window.decorView.postDelayed({
@@ -224,6 +224,7 @@ class MainActivity : Activity() {
 
     private fun styleTvButton(button: Button, primary: Boolean) {
         val density = resources.displayMetrics.density
+        button.backgroundTintList = null
         button.isFocusable = true
         button.isFocusableInTouchMode = true
         button.isAllCaps = false
