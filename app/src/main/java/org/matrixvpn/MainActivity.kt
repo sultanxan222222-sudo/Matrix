@@ -365,6 +365,8 @@ class MainActivity : Activity() {
         lastScoutedRouteId = null
         caravanScoutRunning = false
         warpFallbackAttempted = false
+        caravanQueue = null
+        vpnGateServers = emptyList()
         caravanActive = true
         caravanSwitching = false
         openVpnConnected = false
@@ -432,6 +434,7 @@ class MainActivity : Activity() {
                     wireGuardConfig = config
                     pendingOpenVpnProfile = null
                     activeCaravanServer = null
+                    caravanQueue = null
                     status.text = "Резервный WARP-профиль получен. Переключаю VPN-движок…"
                     mainHandler.postDelayed({
                         if (session != caravanSessionGeneration || isFinishing || isDestroyed) return@postDelayed
@@ -446,7 +449,7 @@ class MainActivity : Activity() {
                     status.text = "VPN Gate и резервный WARP недоступны"
                     showError(
                         "Не удалось найти бесплатный маршрут",
-                        "$reason\\nРезервный WARP тоже не запустился: ${error.message ?: "ошибка профиля или сервиса"}."
+                        "$reason\nРезервный WARP тоже не запустился: ${error.message ?: "ошибка профиля или сервиса"}."
                     )
                 }
             }
@@ -757,6 +760,9 @@ class MainActivity : Activity() {
 
     private fun connectOrDisconnect() {
         if (caravanActive || openVpnAttemptActive || openVpnConnected) {
+            caravanSessionGeneration += 1
+            caravanScoutRunning = false
+            lastScoutedRouteId = null
             caravanActive = false
             caravanSwitching = false
             cancelAttemptTimeout()
