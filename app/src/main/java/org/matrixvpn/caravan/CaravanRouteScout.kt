@@ -45,7 +45,7 @@ class CaravanRouteScout(context: Context) {
         val tasks = servers.map { server ->
             executor.submit(Callable { probeTcpEndpoint(network, server) })
         }
-        val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(TOTAL_BUDGET_MS)
+        val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(TOTAL_BUDGET_MS.toLong())
         return try {
             tasks.mapIndexed { index, future ->
                 val remaining = deadline - System.nanoTime()
