@@ -7,7 +7,8 @@ import java.util.Base64
 
 class VpnGateCsvParserTest {
     private fun encodedProfile(): String {
-        val text = "client\nproto udp\nremote 192.0.2.10 1194\n<ca>\n-----BEGIN CERTIFICATE-----\nTEST\n-----END CERTIFICATE-----\n</ca>\n"
+        val certificatePayload = "A".repeat(180)
+        val text = "client\nproto udp\nremote 192.0.2.10 1194\n<ca>\n-----BEGIN CERTIFICATE-----\n$certificatePayload\n-----END CERTIFICATE-----\n</ca>\n"
         return Base64.getEncoder().encodeToString(text.toByteArray())
     }
 

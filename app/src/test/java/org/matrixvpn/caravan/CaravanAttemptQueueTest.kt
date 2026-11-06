@@ -13,6 +13,21 @@ class CaravanAttemptQueueTest {
     )
 
     @Test
+    fun prioritizationMovesScoutedRouteForwardWithoutRepeatingAttemptedRoutes() {
+        val a = server("192.0.2.1", "a")
+        val b = server("192.0.2.2", "b")
+        val c = server("192.0.2.3", "c")
+        val queue = CaravanAttemptQueue(listOf(a, b, c))
+
+        assertEquals(a.id, queue.next()?.id)
+        queue.prioritize(listOf(c.id, b.id))
+        assertEquals(c.id, queue.next()?.id)
+        assertEquals(b.id, queue.next()?.id)
+        assertNull(queue.next())
+        assertEquals(setOf(a.id, b.id, c.id), queue.attemptedIds())
+    }
+
+    @Test
     fun preferredRouteIsTriedFirstAndNeverRepeated() {
         val a = server("192.0.2.1", "a")
         val b = server("192.0.2.2", "b")
