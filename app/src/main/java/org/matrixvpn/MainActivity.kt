@@ -242,7 +242,7 @@ class MainActivity : Activity() {
                     primary -> Color.rgb(0, 78, 32)
                     else -> Color.rgb(17, 37, 24)
                 })
-                setStroke((if (focused) 3f else 1f) * density,
+                setStroke(((if (focused) 3f else 1f) * density).toInt(),
                     if (focused) Color.rgb(0, 255, 96) else Color.rgb(48, 100, 65))
             }
         button.background = background(false)
