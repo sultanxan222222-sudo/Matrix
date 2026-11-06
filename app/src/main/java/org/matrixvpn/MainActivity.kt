@@ -9,6 +9,8 @@ import android.graphics.Color
 import android.net.VpnService
 import android.net.Uri
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.text.InputType
 import android.view.Gravity
 import android.view.ViewGroup
@@ -22,10 +24,19 @@ import org.amnezia.awg.backend.Tunnel
 import org.amnezia.awg.backend.TunnelActionHandler
 import org.amnezia.awg.backend.Tunnel.State
 import org.amnezia.awg.config.Config
+import org.matrixvpn.caravan.CaravanAction
+import org.matrixvpn.caravan.CaravanAttemptQueue
+import org.matrixvpn.caravan.CaravanFailure
+import org.matrixvpn.caravan.CaravanRecoveryPolicy
+import org.matrixvpn.caravan.CaravanRouteScout
+import org.matrixvpn.caravan.RouteScoutStatus
+import org.matrixvpn.caravan.VpnGateDirectoryRepository
+import org.matrixvpn.caravan.VpnGateServer
 import org.matrixvpn.network.NetworkWatcher
 import org.matrixvpn.network.TunnelConnectivityProbe
 import org.matrixvpn.profile.ImportedVpnProfile
 import org.matrixvpn.profile.VpnProfileInspector
+import org.matrixvpn.vpn.OpenVpnGateEngine
 import java.io.ByteArrayInputStream
 
 class MainActivity : Activity() {
@@ -35,6 +46,24 @@ class MainActivity : Activity() {
     private lateinit var networkWatcher: NetworkWatcher
     private val pickProfileRequest = 4102
     private val vpnPermissionRequest = 4103
+    private val mainHandler = Handler(Looper.getMainLooper())
+    private val vpnGateRepository by lazy { VpnGateDirectoryRepository() }
+    private var vpnGateServers: List<VpnGateServer> = emptyList()
+    private var caravanQueue: CaravanAttemptQueue? = null
+    private var preferredCaravanServerId: String? = null
+    private var openVpnEngine: OpenVpnGateEngine? = null
+    private var openVpnAttemptActive = false
+    private var openVpnConnected = false
+    private var caravanActive = false
+    private var caravanSwitching = false
+    private var pendingAutoConnect = false
+    private var pendingOpenVpnProfile: String? = null
+    private var attemptTimeout: Runnable? = null
+    private var activeCaravanServer: VpnGateServer? = null
+    private var lastScoutedRouteId: String? = null
+    private var caravanScoutRunning = false
+    private var caravanSessionGeneration = 0L
+    private var warpFallbackAttempted = false
     private val tunnelActions = object : TunnelActionHandler {
         override fun runPreUp(scripts: MutableCollection<String>) {}
         override fun runPostUp(scripts: MutableCollection<String>) {}
@@ -72,7 +101,7 @@ class MainActivity : Activity() {
             setPadding(8, 18, 8, 8)
         }
         val menuSubtitle = TextView(this).apply {
-            text = "УПРАВЛЕНИЕ VPN • ВЕРСИЯ 0.5.1"
+            text = "УПРАВЛЕНИЕ VPN • ВЕРСИЯ 0.6.0"
             textSize = 12f
             setTextColor(Color.rgb(130, 220, 150))
             gravity = Gravity.CENTER
@@ -81,7 +110,7 @@ class MainActivity : Activity() {
         val connectionHeading = sectionHeading("СОСТОЯНИЕ СОЕДИНЕНИЯ")
         val helpHeading = sectionHeading("СПРАВКА")
         status = TextView(this).apply {
-            text = "Сборка 0.5.1\nVPN-туннель: не подключён\nАвтоматическое восстановление: прототип"
+            text = "Сборка 0.6.0\nКараван: готов к разведке\nVPN-туннель: не подключён"
             textSize = 16f
             setTextColor(Color.WHITE)
             gravity = Gravity.CENTER
@@ -103,7 +132,7 @@ class MainActivity : Activity() {
             setOnClickListener { fetchFreeWarpProfile() }
         }
         val findVpnButton = Button(this).apply {
-            text = "3. Найти бесплатные VPN-серверы"
+            text = "Каталог бесплатных VPN-серверов"
             setOnClickListener { searchVpnServices() }
         }
         val pasteButton = Button(this).apply {
@@ -111,12 +140,12 @@ class MainActivity : Activity() {
             setOnClickListener { importFromClipboard() }
         }
         connectButton = Button(this).apply {
-            text = "Подключить VPN"
-            isEnabled = false
+            text = "Подключиться автоматически"
+            isEnabled = true
             setOnClickListener { connectOrDisconnect() }
         }
         val help = TextView(this).apply {
-            text = "Импортируйте конфигурацию из буфера или файл с телефона. WARP работает отдельно. Пункт бесплатных серверов получает актуальный каталог VPN Gate и передаёт OpenVPN-профиль совместимому приложению; встроенное подключение MATRIX пока поддерживает WireGuard/AmneziaWG. Бесплатные серверы добровольцев не гарантируют доступность и конфиденциальность."
+            text = "MATRIX CARAVAN: автоматический поиск бесплатных маршрутов VPN Gate и подключение встроенным OpenVPN-движком. Также поддерживаются WARP, WireGuard, AmneziaWG и импорт профилей. Бесплатные ретрансляторы принадлежат добровольцам и не подходят для конфиденциальных данных."
             textSize = 13f
             gravity = Gravity.CENTER
             setPadding(8, 12, 8, 12)
@@ -168,6 +197,13 @@ class MainActivity : Activity() {
     override fun onStop() {
         networkWatcher.stop()
         super.onStop()
+    }
+
+    override fun onDestroy() {
+        cancelAttemptTimeout()
+        openVpnEngine?.release()
+        openVpnEngine = null
+        super.onDestroy()
     }
 
 
@@ -251,161 +287,411 @@ class MainActivity : Activity() {
 
 
     /**
-     * Loads the public VPN Gate relay directory. These are real volunteer-run VPN servers,
-     * not WARP profiles. VPN Gate publishes OpenVPN client configs; MATRIX currently uses
-     * WireGuard/AWG internally, so selected OpenVPN profiles are handed to a compatible
-     * external VPN app instead of being falsely treated as WireGuard configs.
+     * Refresh the public VPN Gate directory. Selecting a relay launches it through
+     * MATRIX's embedded OpenVPN engine; no external VPN app is required.
      */
     private fun searchVpnServices() {
-        status.text = "Поиск бесплатных VPN-серверов…"
-        connectButton.isEnabled = wireGuardConfig != null
-        val loading = AlertDialog.Builder(this)
-            .setTitle("Бесплатные VPN-серверы")
-            .setMessage("Загружаю список VPN Gate. Серверы предоставлены добровольцами; доступность и доверие к ним не гарантируются.")
-            .setNegativeButton("Отмена", null)
-            .create()
-        loading.show()
+        status.text = "Караван: разведка бесплатных серверов VPN Gate…"
         Thread {
-            var connection: java.net.HttpURLConnection? = null
-            try {
-                connection = (java.net.URL("https://www.vpngate.net/api/iphone/").openConnection() as java.net.HttpURLConnection).apply {
-                    requestMethod = "GET"
-                    connectTimeout = 15000
-                    readTimeout = 20000
-                    setRequestProperty("User-Agent", "MATRIX-VPN-Android/0.5.1")
-                    setRequestProperty("Accept", "text/csv,text/plain,*/*")
-                    instanceFollowRedirects = true
-                }
-                val code = connection.responseCode
-                require(code in 200..299) { "Каталог VPN Gate ответил HTTP $code." }
-                val csv = connection.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
-                require(csv.length <= 20_000_000) { "Ответ каталога слишком большой." }
-                val lines = csv.lineSequence().filter { it.isNotBlank() && !it.startsWith("*") }.toList()
-                val headerIndex = lines.indexOfFirst { it.trimStart('#').startsWith("HostName,IP,Score,Ping,Speed,CountryLong", ignoreCase = true) }
-                require(headerIndex >= 0) { "Каталог вернул неизвестный формат." }
-                val servers = lines.drop(headerIndex + 1).mapNotNull { line ->
-                    val fields = parseCsvLine(line)
-                    if (fields.size < 15) return@mapNotNull null
-                    val host = fields[0].trim()
-                    val ip = fields[1].trim()
-                    val score = fields[2].toLongOrNull() ?: 0L
-                    val ping = fields[3].toLongOrNull() ?: -1L
-                    val speed = fields[4].toLongOrNull() ?: 0L
-                    val country = fields[5].trim().ifBlank { fields[6].trim().ifBlank { "Неизвестная страна" } }
-                    val sessions = fields[7].toIntOrNull() ?: 0
-                    val config = fields[14].trim()
-                    if (host.isBlank() || ip.isBlank() || config.isBlank()) null
-                    else VpnGateServer(host, ip, country, ping, speed, sessions, score, config)
-                }.sortedWith(compareByDescending<VpnGateServer> { it.score }.thenBy { if (it.ping < 0) Long.MAX_VALUE else it.ping }).take(30)
-                runOnUiThread {
-                    if (isFinishing || isDestroyed) return@runOnUiThread
-                    loading.dismiss()
+            val result = runCatching { vpnGateRepository.fetchServers() }
+            runOnUiThread {
+                result.onSuccess { servers ->
+                    vpnGateServers = servers
                     if (servers.isEmpty()) {
-                        status.text = "Список бесплатных VPN-серверов пуст"
-                        showError("Серверы не найдены", "VPN Gate не вернул доступных конфигураций. Попробуйте позже.")
+                        status.text = "VPN Gate не вернул пригодных маршрутов"
+                        showError("Серверы не найдены", "Каталог ответил, но не вернул корректных OpenVPN-профилей. Попробуйте позже.")
                     } else {
-                        status.text = "Найдено бесплатных VPN-серверов: ${servers.size}\nИсточник: VPN Gate (добровольческие серверы)"
-                        val labels = servers.map { server ->
-                            val pingLabel = if (server.ping >= 0) "${server.ping} мс" else "ping неизвестен"
+                        status.text = "Разведка завершена: найдено маршрутов — ${servers.size}"
+                        val labels = servers.take(40).map { server ->
+                            val pingLabel = if (server.ping > 0) "${server.ping} мс" else "ping неизвестен"
                             val speedLabel = if (server.speed > 0) " • ${server.speed / 1_000_000} Мбит/с" else ""
                             "${server.country} • ${server.host}\n$pingLabel • сессий: ${server.sessions}$speedLabel"
                         }.toTypedArray()
                         AlertDialog.Builder(this)
-                            .setTitle("Бесплатные VPN-серверы (VPN Gate)")
+                            .setTitle("Бесплатные маршруты VPN Gate")
                             .setItems(labels) { _, which -> offerVpnGateProfile(servers[which]) }
                             .setNegativeButton("Закрыть", null)
                             .setNeutralButton("О VPN Gate") { _, _ ->
-                                try { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.vpngate.net/"))) }
-                                catch (_: Exception) { showError("Не удалось открыть сайт", "Откройте https://www.vpngate.net/ вручную.") }
+                                startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.vpngate.net/")))
                             }
                             .show()
                     }
+                }.onFailure { error ->
+                    status.text = "Разведка VPN Gate не удалась"
+                    showError("Не удалось загрузить каталог", error.message ?: "VPN Gate сейчас недоступен.")
                 }
-            } catch (e: Exception) {
-                runOnUiThread {
-                    if (isFinishing || isDestroyed) return@runOnUiThread
-                    loading.dismiss()
-                    status.text = "Поиск бесплатных VPN-серверов не выполнен"
-                    showError("Ошибка поиска серверов", (e.message ?: "VPN Gate сейчас недоступен.") + "\n\nПопробуйте позже. WARP и ручной импорт работают отдельно.")
-                }
-            } finally {
-                connection?.disconnect()
             }
         }.start()
     }
 
-    private data class VpnGateServer(
-        val host: String,
-        val ip: String,
-        val country: String,
-        val ping: Long,
-        val speed: Long,
-        val sessions: Int,
-        val score: Long,
-        val openVpnConfigBase64: String
-    )
-
-    private fun parseCsvLine(line: String): List<String> {
-        val fields = mutableListOf<String>()
-        val field = StringBuilder()
-        var quoted = false
-        var index = 0
-        while (index < line.length) {
-            val ch = line[index]
-            when {
-                ch == '"' && quoted && index + 1 < line.length && line[index + 1] == '"' -> {
-                    field.append('"')
-                    index++
-                }
-                ch == '"' -> quoted = !quoted
-                ch == ',' && !quoted -> {
-                    fields.add(field.toString())
-                    field.setLength(0)
-                }
-                else -> field.append(ch)
-            }
-            index++
-        }
-        fields.add(field.toString())
-        return fields
-    }
-
     private fun offerVpnGateProfile(server: VpnGateServer) {
         AlertDialog.Builder(this)
-            .setTitle("Бесплатный сервер: ${server.country}")
+            .setTitle("Маршрут: ${server.country}")
             .setMessage(
-                "Сервер: ${server.host} (${server.ip})\n\n" +
-                "Это реальный бесплатный VPN-сервер VPN Gate, не WARP. Каталог предоставляет профиль OpenVPN. " +
-                "Встроенный движок MATRIX сейчас поддерживает WireGuard/AmneziaWG, поэтому для подключения этого сервера нужен совместимый внешний OpenVPN-клиент. " +
-                "Профиль будет передан через системное меню Android. Бесплатные серверы управляются добровольцами; не используйте их для конфиденциальных данных."
+                "Сервер: ${server.host} (${server.ip})\n" +
+                    "Задержка: ${if (server.ping > 0) "${server.ping} мс" else "не измерена"}\n\n" +
+                    "MATRIX подключится встроенным OpenVPN-движком. При ошибке караван попробует следующий маршрут. " +
+                    "Это добровольческий сервер VPN Gate: не передавайте через него пароли, банковские данные и другую чувствительную информацию."
             )
             .setNegativeButton("Отмена", null)
-            .setPositiveButton("Получить профиль") { _, _ -> shareVpnGateProfile(server) }
+            .setPositiveButton("Подключить и искать обход") { _, _ ->
+                startCaravanAutoConnect(server.id)
+            }
             .show()
     }
 
-    private fun shareVpnGateProfile(server: VpnGateServer) {
+    private fun ensureOpenVpnEngine(): OpenVpnGateEngine {
+        val existing = openVpnEngine
+        if (existing != null) return existing
+        return OpenVpnGateEngine(applicationContext).also { engine ->
+            engine.onStateChanged = { state, message -> onOpenVpnState(state, message) }
+            openVpnEngine = engine
+        }
+    }
+
+    private fun startCaravanAutoConnect(preferredId: String? = null) {
+        preferredCaravanServerId = preferredId
+        val prepareIntent = VpnService.prepare(this)
+        if (prepareIntent != null) {
+            pendingAutoConnect = true
+            startActivityForResult(prepareIntent, vpnPermissionRequest)
+            return
+        }
+        loadCaravanDirectoryAndConnect()
+    }
+
+    private fun loadCaravanDirectoryAndConnect() {
+        caravanSessionGeneration += 1
+        lastScoutedRouteId = null
+        caravanScoutRunning = false
+        warpFallbackAttempted = false
+        caravanQueue = null
+        vpnGateServers = emptyList()
+        caravanActive = true
+        caravanSwitching = false
+        openVpnConnected = false
+        openVpnAttemptActive = false
+        cancelAttemptTimeout()
+        status.text = "Караван: загружаю маршруты и выбираю лучший…"
+        connectButton.text = "Остановить караван"
+        connectButton.isEnabled = true
+
+        Thread {
+            val result = runCatching { vpnGateRepository.fetchServers() }
+            runOnUiThread {
+                result.onSuccess { servers ->
+                    vpnGateServers = servers
+                    if (servers.isEmpty()) {
+                        startCaravanWarpFallback("VPN Gate не вернул пригодных OpenVPN-маршрутов.")
+                    } else {
+                        caravanQueue = CaravanAttemptQueue(servers, preferredCaravanServerId)
+                        connectNextCaravanServer()
+                    }
+                }.onFailure { error ->
+                    startCaravanWarpFallback(
+                        "Не удалось получить каталог VPN Gate: ${error.message ?: "сервис недоступен"}."
+                    )
+                }
+            }
+        }.start()
+    }
+
+    /**
+     * Last free fallback after VPN Gate discovery/relays fail. This reuses the
+     * project's existing WARP-compatible profile generator and WireGuard/AWG
+     * engine; the profile generator is third-party and is not operated by
+     * Cloudflare, so availability is best-effort rather than guaranteed.
+     */
+    private fun startCaravanWarpFallback(reason: String) {
+        if (warpFallbackAttempted) {
+            caravanActive = false
+            caravanSwitching = false
+            connectButton.isEnabled = true
+            connectButton.text = "Повторить автоматический поиск"
+            status.text = "Бесплатные маршруты исчерпаны"
+            showError("Не удалось подключиться", reason)
+            return
+        }
+
+        warpFallbackAttempted = true
+        val session = caravanSessionGeneration
+        caravanActive = false
+        caravanSwitching = true
+        openVpnAttemptActive = false
+        openVpnConnected = false
+        cancelAttemptTimeout()
+        connectButton.isEnabled = false
+        status.text = "VPN Gate не дал рабочего маршрута. Караван проверяет резервный WARP…"
+        runCatching { openVpnEngine?.disconnect() }
+
+        Thread {
+            val result = runCatching {
+                fetchCaravanWarpConfig()
+            }
+            runOnUiThread {
+                if (session != caravanSessionGeneration || isFinishing || isDestroyed) return@runOnUiThread
+                result.onSuccess { config ->
+                    wireGuardConfig = config
+                    pendingOpenVpnProfile = null
+                    activeCaravanServer = null
+                    caravanQueue = null
+                    status.text = "Резервный WARP-профиль получен. Переключаю VPN-движок…"
+                    mainHandler.postDelayed({
+                        if (session != caravanSessionGeneration || isFinishing || isDestroyed) return@postDelayed
+                        caravanSwitching = false
+                        connectButton.isEnabled = true
+                        startWireGuardTunnel()
+                    }, 1_200L)
+                }.onFailure { error ->
+                    caravanSwitching = false
+                    connectButton.isEnabled = true
+                    connectButton.text = "Повторить автоматический поиск"
+                    status.text = "VPN Gate и резервный WARP недоступны"
+                    showError(
+                        "Не удалось найти бесплатный маршрут",
+                        "$reason\nРезервный WARP тоже не запустился: ${error.message ?: "ошибка профиля или сервиса"}."
+                    )
+                }
+            }
+        }.start()
+    }
+
+    /** Downloads and validates a fresh WARP-compatible profile without showing UI from the worker. */
+    private fun fetchCaravanWarpConfig(): Config {
+        var connection: java.net.HttpURLConnection? = null
         try {
-            val decoded = android.util.Base64.decode(server.openVpnConfigBase64, android.util.Base64.DEFAULT)
-            val profileText = String(decoded, Charsets.UTF_8)
-            require(profileText.contains("client", ignoreCase = true) && profileText.contains("remote", ignoreCase = true)) {
-                "Каталог вернул недопустимый OpenVPN-профиль."
+            val url = java.net.URL("https://awgconfig.com/api/warp?mode=legacy&count=1&dns=cloudflare")
+            connection = (url.openConnection() as java.net.HttpURLConnection).apply {
+                requestMethod = "GET"
+                connectTimeout = 15_000
+                readTimeout = 20_000
+                setRequestProperty("Accept", "application/json")
+                setRequestProperty("User-Agent", "MATRIX-VPN-Android/0.6.0")
+                instanceFollowRedirects = true
             }
-            val safeHost = server.host.replace(Regex("[^A-Za-z0-9._-]"), "_")
-            val outDir = java.io.File(cacheDir, "vpn-gate").apply { mkdirs() }
-            val file = java.io.File(outDir, "vpngate-$safeHost.ovpn")
-            file.writeText(profileText, Charsets.UTF_8)
-            val uri = androidx.core.content.FileProvider.getUriForFile(this, "${packageName}.fileprovider", file)
-            val shareIntent = Intent(Intent.ACTION_SEND).apply {
-                type = "application/x-openvpn-profile"
-                putExtra(Intent.EXTRA_STREAM, uri)
-                putExtra(Intent.EXTRA_SUBJECT, "VPN Gate profile - ${server.country}")
-                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                clipData = android.content.ClipData.newUri(contentResolver, file.name, uri)
+            val code = connection.responseCode
+            val stream = if (code in 200..299) connection.inputStream else connection.errorStream
+            val response = stream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }
+                ?: throw IllegalStateException("Сервис не вернул ответ (HTTP $code).")
+            require(response.length <= 1_000_000) { "Ответ сервиса WARP слишком большой." }
+            if (code !in 200..299) throw IllegalStateException("Сервис WARP ответил HTTP $code.")
+            val json = org.json.JSONObject(response)
+            require(json.optBoolean("success", true)) {
+                json.optString("error").ifBlank { "Сервис не смог создать профиль WARP." }
             }
-            startActivity(Intent.createChooser(shareIntent, "Открыть профиль в OpenVPN-клиенте"))
-        } catch (e: Exception) {
-            showError("Не удалось подготовить профиль", e.message ?: "Профиль сервера не удалось прочитать.")
+            var encoded = json.optString("content")
+            if (encoded.isBlank()) {
+                val configs = json.optJSONArray("configs")
+                if (configs != null && configs.length() > 0) encoded = configs.getJSONObject(0).optString("content")
+            }
+            require(encoded.isNotBlank()) { "Сервис не вернул содержимое профиля." }
+            val profileText = try {
+                String(android.util.Base64.decode(encoded, android.util.Base64.DEFAULT), Charsets.UTF_8)
+            } catch (_: IllegalArgumentException) {
+                encoded
+            }
+            require(profileText.length <= 2_000_000) { "Профиль WARP слишком большой." }
+            require(profileText.contains("[Interface]", ignoreCase = true) &&
+                profileText.contains("[Peer]", ignoreCase = true)) {
+                "Сервис вернул профиль неизвестного формата."
+            }
+            return Config.parse(ByteArrayInputStream(profileText.toByteArray(Charsets.UTF_8)))
+        } finally {
+            connection?.disconnect()
+        }
+    }
+
+    private fun connectNextCaravanServer() {
+        if (!caravanActive || caravanSwitching) return
+        val server = caravanQueue?.next()
+        if (server == null) {
+            if (!warpFallbackAttempted) {
+                startCaravanWarpFallback("Все проверенные серверы VPN Gate отклонили соединение или не прошли проверку.")
+                return
+            }
+            caravanActive = false
+            openVpnAttemptActive = false
+            openVpnConnected = false
+            activeCaravanServer = null
+            cancelAttemptTimeout()
+            connectButton.isEnabled = true
+            connectButton.text = "Повторить автоматический поиск"
+            status.text = "Караван исчерпал бесплатные маршруты"
+            showError("Нет рабочего маршрута", "VPN Gate и резервный режим WARP не смогли установить рабочее соединение. Проверьте доступ к интернету и повторите попытку.")
+            return
+        }
+
+        activeCaravanServer = server
+        openVpnAttemptActive = true
+        openVpnConnected = false
+        status.text = "Караван: подключаюсь к ${server.country} • ${server.host}…"
+        connectButton.text = "Остановить караван"
+        try {
+            ensureOpenVpnEngine().connect(server.decodeOpenVpnProfile())
+            scheduleAttemptTimeout(server.id)
+        } catch (error: Exception) {
+            failoverCaravan(
+                CaravanFailure.AUTHENTICATION_REJECTED,
+                error.message ?: "Профиль сервера не удалось запустить."
+            )
+        }
+    }
+
+    private fun scheduleAttemptTimeout(serverId: String) {
+        cancelAttemptTimeout()
+        val timeout = Runnable {
+            if (caravanActive && activeCaravanServer?.id == serverId && !openVpnConnected && !caravanSwitching) {
+                failoverCaravan(CaravanFailure.CONNECT_TIMEOUT, "сервер не установил соединение вовремя")
+            }
+        }
+        attemptTimeout = timeout
+        mainHandler.postDelayed(timeout, 25_000L)
+    }
+
+    private fun cancelAttemptTimeout() {
+        attemptTimeout?.let(mainHandler::removeCallbacks)
+        attemptTimeout = null
+    }
+
+    private fun onOpenVpnState(state: String, message: String) {
+        runOnUiThread {
+            when (state.uppercase()) {
+                "CONNECTED" -> {
+                    cancelAttemptTimeout()
+                    openVpnAttemptActive = true
+                    status.text = "OpenVPN-туннель установлен. Проверяю реальный доступ в интернет…"
+                    Thread {
+                        val probe = TunnelConnectivityProbe.check()
+                        runOnUiThread {
+                            if (probe.reachable) {
+                                openVpnConnected = true
+                                status.text = "VPN подключён через ${activeCaravanServer?.country ?: "OpenVPN-профиль"}\n${probe.message}\nКараван проверяет запасные маршруты."
+                                connectButton.text = "Отключить VPN"
+                                if (caravanActive) scoutAlternativeRoutesInBackground()
+                            } else if (caravanActive) {
+                                failoverCaravan(CaravanFailure.EGRESS_CHECK_FAILED, probe.message)
+                            } else {
+                                openVpnConnected = true
+                                status.text = "OpenVPN-туннель запущен, но интернет-проверка не пройдена.\n${probe.message}"
+                                connectButton.text = "Отключить VPN"
+                            }
+                        }
+                    }.start()
+                }
+                "AUTH_FAILED" -> {
+                    if (caravanActive) {
+                        failoverCaravan(CaravanFailure.AUTHENTICATION_REJECTED, "сервер отклонил аутентификацию")
+                    } else {
+                        status.text = "OpenVPN: сервер отклонил аутентификацию"
+                        connectButton.text = "Подключиться автоматически"
+                    }
+                }
+                "EXITING" -> {
+                    if (caravanActive && !caravanSwitching) {
+                        failoverCaravan(CaravanFailure.TUNNEL_DROPPED, "сервер завершил соединение")
+                    } else if (!caravanActive && !caravanSwitching) {
+                        openVpnConnected = false
+                        openVpnAttemptActive = false
+                        connectButton.text = "Подключиться автоматически"
+                        status.text = "VPN-туннель отключён"
+                    }
+                }
+                "RECONNECTING" -> {
+                    status.text = "Караван: основной маршрут нестабилен, проверяю восстановление…"
+                    val serverId = activeCaravanServer?.id
+                    if (caravanActive && serverId != null) scheduleAttemptTimeout(serverId)
+                }
+                "CONNECTING", "WAIT", "RESOLVE", "TCP_CONNECT" -> {
+                    if (caravanActive) status.text = "Караван: устанавливаю защищённый маршрут…"
+                }
+            }
+        }
+    }
+
+    /**
+     * Tests alternate TCP endpoints over the physical network while the
+     * active tunnel remains connected. UDP profiles are never classified
+     * as blocked by this TCP-only preflight.
+     */
+    private fun scoutAlternativeRoutesInBackground() {
+        val currentId = activeCaravanServer?.id ?: return
+        val session = caravanSessionGeneration
+        if (caravanScoutRunning || lastScoutedRouteId == currentId) return
+        val candidates = vpnGateServers.filterNot { it.id == currentId }.take(30)
+        if (candidates.isEmpty()) return
+
+        caravanScoutRunning = true
+        lastScoutedRouteId = currentId
+        Thread {
+            val results = runCatching {
+                CaravanRouteScout(applicationContext).scout(candidates)
+            }.getOrElse { emptyList() }
+
+            runOnUiThread {
+                caravanScoutRunning = false
+                if (session != caravanSessionGeneration || !caravanActive || activeCaravanServer?.id != currentId) return@runOnUiThread
+
+                val reachable = results
+                    .filter { it.status == RouteScoutStatus.TCP_REACHABLE }
+                    .sortedBy { it.latencyMillis ?: Long.MAX_VALUE }
+                    .map { it.serverId }
+                caravanQueue?.prioritize(reachable)
+
+                val udpCount = results.count { it.status == RouteScoutStatus.UDP_OR_UNSPECIFIED }
+                val reachableCount = reachable.size
+                val message = when {
+                    results.isEmpty() -> "Разведка запасных маршрутов недоступна."
+                    reachableCount > 0 -> "Разведка: TCP доступны $reachableCount; UDP/непроверенных: $udpCount."
+                    else -> "TCP-маршруты не подтверждены; UDP и непроверенные узлы остаются в очереди."
+                }
+                status.text = "VPN подключён через ${activeCaravanServer?.country ?: "OpenVPN"}\n$message\nОсновной туннель не переключался."
+            }
+        }.start()
+    }
+
+    private fun failoverCaravan(failure: CaravanFailure, reason: String) {
+        if (!caravanActive || caravanSwitching) return
+        val hasAlternative = caravanQueue?.hasNext() == true
+        when (CaravanRecoveryPolicy.nextAction(failure, hasAlternative)) {
+            CaravanAction.TRY_NEXT_ROUTE -> {
+                caravanSwitching = true
+                cancelAttemptTimeout()
+                openVpnConnected = false
+                status.text = "Обнаружено препятствие: $reason. Караван ищет обходной маршрут…"
+                runCatching { openVpnEngine?.disconnect() }
+                mainHandler.postDelayed({
+                    caravanSwitching = false
+                    openVpnAttemptActive = false
+                    connectNextCaravanServer()
+                }, 1_200L)
+            }
+            CaravanAction.WAIT_FOR_NETWORK -> {
+                cancelAttemptTimeout()
+                status.text = "Сеть недоступна. Караван ожидает восстановления соединения."
+            }
+            CaravanAction.STOP -> {
+                caravanActive = false
+                cancelAttemptTimeout()
+                connectButton.text = "Подключиться автоматически"
+                status.text = "Караван остановлен: $reason"
+            }
+        }
+    }
+
+    private fun connectImportedOpenVpnProfile(profileText: String) {
+        caravanActive = false
+        caravanSwitching = false
+        cancelAttemptTimeout()
+        try {
+            ensureOpenVpnEngine().connect(profileText)
+            openVpnAttemptActive = true
+            openVpnConnected = false
+            connectButton.text = "Отключить VPN"
+            status.text = "Запускаю встроенный OpenVPN-движок…"
+        } catch (error: Exception) {
+            openVpnAttemptActive = false
+            connectButton.text = "Подключиться автоматически"
+            showError("Не удалось запустить OpenVPN", error.message ?: "Проверьте профиль.")
         }
     }
 
@@ -473,6 +759,21 @@ class MainActivity : Activity() {
     }
 
     private fun connectOrDisconnect() {
+        if (caravanActive || openVpnAttemptActive || openVpnConnected) {
+            caravanSessionGeneration += 1
+            caravanScoutRunning = false
+            lastScoutedRouteId = null
+            caravanActive = false
+            caravanSwitching = false
+            cancelAttemptTimeout()
+            runCatching { openVpnEngine?.disconnect() }
+            openVpnAttemptActive = false
+            openVpnConnected = false
+            connectButton.text = "Подключиться автоматически"
+            status.text = "VPN отключается…"
+            return
+        }
+
         if (tunnelUp) {
             connectButton.isEnabled = false
             Thread {
@@ -481,6 +782,7 @@ class MainActivity : Activity() {
                     runOnUiThread {
                         status.text = "VPN-туннель: отключён"
                         connectButton.isEnabled = true
+                        connectButton.text = "Подключиться автоматически"
                     }
                 } catch (e: Exception) {
                     runOnUiThread {
@@ -491,13 +793,26 @@ class MainActivity : Activity() {
             }.start()
             return
         }
-        if (wireGuardConfig == null) {
-            showError("Нет профиля VPN", "Сначала импортируйте и проверьте файл WireGuard или AmneziaWG .conf.")
+
+        val importedOpenVpn = pendingOpenVpnProfile
+        if (importedOpenVpn != null) {
+            val prepareIntent = VpnService.prepare(this)
+            if (prepareIntent != null) startActivityForResult(prepareIntent, vpnPermissionRequest)
+            else {
+                pendingOpenVpnProfile = null
+                connectImportedOpenVpnProfile(importedOpenVpn)
+            }
             return
         }
-        val prepareIntent = VpnService.prepare(this)
-        if (prepareIntent != null) startActivityForResult(prepareIntent, vpnPermissionRequest)
-        else startWireGuardTunnel()
+
+        if (wireGuardConfig != null) {
+            val prepareIntent = VpnService.prepare(this)
+            if (prepareIntent != null) startActivityForResult(prepareIntent, vpnPermissionRequest)
+            else startWireGuardTunnel()
+            return
+        }
+
+        startCaravanAutoConnect()
     }
 
     private fun startWireGuardTunnel() {
@@ -534,8 +849,23 @@ class MainActivity : Activity() {
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
         if (requestCode == vpnPermissionRequest) {
-            if (resultCode == RESULT_OK) startWireGuardTunnel()
-            else showError("Разрешение VPN не предоставлено", "Android не разрешил приложению MATRIX создать VPN-туннель.")
+            if (resultCode == RESULT_OK) {
+                when {
+                    pendingAutoConnect -> {
+                        pendingAutoConnect = false
+                        loadCaravanDirectoryAndConnect()
+                    }
+                    pendingOpenVpnProfile != null -> {
+                        val profile = pendingOpenVpnProfile
+                        pendingOpenVpnProfile = null
+                        if (profile != null) connectImportedOpenVpnProfile(profile)
+                    }
+                    else -> startWireGuardTunnel()
+                }
+            } else {
+                pendingAutoConnect = false
+                showError("Разрешение VPN не предоставлено", "Android не разрешил приложению MATRIX создать VPN-туннель.")
+            }
             return
         }
         if (requestCode != pickProfileRequest || resultCode != RESULT_OK) return
@@ -561,27 +891,30 @@ class MainActivity : Activity() {
                 ImportedVpnProfile.Format.UNKNOWN -> "Неизвестный формат профиля"
             }
             wireGuardConfig = null
+            pendingOpenVpnProfile = null
             if (profile.format == ImportedVpnProfile.Format.WIREGUARD || profile.format == ImportedVpnProfile.Format.AMNEZIAWG) {
                 try {
                     wireGuardConfig = Config.parse(ByteArrayInputStream(profileText.toByteArray(Charsets.UTF_8)))
                 } catch (e: Exception) {
                     showError("Неверный профиль WireGuard", e.message ?: "Проверка WireGuard отклонила эту конфигурацию.")
                 }
+            } else if (profile.format == ImportedVpnProfile.Format.OPENVPN) {
+                pendingOpenVpnProfile = profileText
             }
-            connectButton.isEnabled = wireGuardConfig != null
+            connectButton.isEnabled = true
             val endpointText = if (profile.endpointHints.isEmpty()) "Адрес сервера не найден" else profile.endpointHints.joinToString("\n")
             val details = buildString {
                 append("Определённый формат: ").append(formatLabel).append("\n")
                 if (profile.peerCount > 0) append("Количество узлов: ").append(profile.peerCount).append("\n")
                 append("Обнаруженные адреса серверов:\n").append(endpointText).append("\n\n")
                 if (profile.hasInlineCredentials) append("Профиль содержит приватные ключи или учётные данные. Не передавайте его посторонним.\n\n")
-                if (wireGuardConfig != null && profile.format == ImportedVpnProfile.Format.AMNEZIAWG) append("Профиль AmneziaWG принят встроенным модулем AWG. Можно запросить разрешение Android и подключиться.")
-                else if (wireGuardConfig != null) append("Конфигурация WireGuard проверена. Теперь можно запросить разрешение Android и подключиться.")
-                else if (profile.format == ImportedVpnProfile.Format.OPENVPN) append("Профиль OpenVPN распознан, но модуль для подключения OpenVPN пока не встроен.")
-                else append("Подходящая конфигурация WireGuard/AmneziaWG не загружена.")
+                if (wireGuardConfig != null && profile.format == ImportedVpnProfile.Format.AMNEZIAWG) append("Профиль AmneziaWG принят встроенным модулем AWG. Можно подключаться.")
+                else if (wireGuardConfig != null) append("Конфигурация WireGuard проверена встроенным движком. Можно подключаться.")
+                else if (pendingOpenVpnProfile != null) append("Профиль OpenVPN принят. MATRIX подключит его собственным встроенным движком, без стороннего приложения.")
+                else append("Не удалось подготовить подходящую конфигурацию VPN.")
                 append("\n\nВ этой версии профиль хранится только в памяти и не сохраняется приложением MATRIX.")
             }
-            status.text = if (wireGuardConfig != null) "Профиль $formatLabel готов\nVPN-туннель: отключён"
+            status.text = if (wireGuardConfig != null || pendingOpenVpnProfile != null) "Профиль $formatLabel готов\nVPN-туннель: отключён"
             else "Профиль проверен: $formatLabel\nVPN-туннель: отключён"
             AlertDialog.Builder(this).setTitle("Профиль VPN обработан").setMessage(details).setPositiveButton("Понятно", null).show()
         } catch (e: Exception) {

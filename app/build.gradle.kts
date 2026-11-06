@@ -9,8 +9,8 @@ android {
         applicationId = "org.matrixvpn"
         minSdk = 26
         targetSdk = 35
-        versionCode = 6
-        versionName = "0.5.1"
+        versionCode = 7
+        versionName = "0.6.0-caravan"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     compileOptions {
@@ -19,12 +19,19 @@ android {
         isCoreLibraryDesugaringEnabled = true
     }
     kotlinOptions { jvmTarget = "17" }
+    packaging {
+        jniLibs {
+            useLegacyPackaging = true
+        }
+    }
 }
 dependencies {
     implementation("androidx.core:core-ktx:1.15.0")
-    // Embeddable AmneziaWG tunnel library; supports AWG configuration extensions
-    // while retaining the WireGuard Android backend/config API used by MATRIX.
+    // Existing WireGuard / AmneziaWG tunnel backend.
     implementation("com.zaneschepke:amneziawg-android:2.3.7")
+    // Pinned GPL-licensed OpenVPN for Android engine; source and native libraries
+    // are supplied by the OpenGateVPN submodule (see THIRD_PARTY_NOTICES.md).
+    implementation(project(":openvpnEngine"))
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.3")
     testImplementation("junit:junit:4.13.2")
 }
