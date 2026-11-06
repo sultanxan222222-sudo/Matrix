@@ -62,6 +62,8 @@ class MainActivity : Activity() {
     private var activeCaravanServer: VpnGateServer? = null
     private var lastScoutedRouteId: String? = null
     private var caravanScoutRunning = false
+    private var caravanSessionGeneration = 0L
+    private var warpFallbackAttempted = false
     private val tunnelActions = object : TunnelActionHandler {
         override fun runPreUp(scripts: MutableCollection<String>) {}
         override fun runPostUp(scripts: MutableCollection<String>) {}
@@ -359,6 +361,10 @@ class MainActivity : Activity() {
     }
 
     private fun loadCaravanDirectoryAndConnect() {
+        caravanSessionGeneration += 1
+        lastScoutedRouteId = null
+        caravanScoutRunning = false
+        warpFallbackAttempted = false
         caravanActive = true
         caravanSwitching = false
         openVpnConnected = false
@@ -374,36 +380,141 @@ class MainActivity : Activity() {
                 result.onSuccess { servers ->
                     vpnGateServers = servers
                     if (servers.isEmpty()) {
-                        caravanActive = false
-                        connectButton.text = "Подключиться автоматически"
-                        status.text = "Нет доступных маршрутов"
-                        showError("Маршруты не найдены", "VPN Gate не вернул пригодные OpenVPN-профили. Попробуйте позже или импортируйте собственный профиль.")
+                        startCaravanWarpFallback("VPN Gate не вернул пригодных OpenVPN-маршрутов.")
                     } else {
                         caravanQueue = CaravanAttemptQueue(servers, preferredCaravanServerId)
                         connectNextCaravanServer()
                     }
                 }.onFailure { error ->
-                    caravanActive = false
-                    connectButton.text = "Подключиться автоматически"
-                    status.text = "Не удалось получить список маршрутов"
-                    showError("Разведка не выполнена", error.message ?: "VPN Gate сейчас недоступен.")
+                    startCaravanWarpFallback(
+                        "Не удалось получить каталог VPN Gate: ${error.message ?: "сервис недоступен"}."
+                    )
                 }
             }
         }.start()
+    }
+
+    /**
+     * Last free fallback after VPN Gate discovery/relays fail. This reuses the
+     * project's existing WARP-compatible profile generator and WireGuard/AWG
+     * engine; the profile generator is third-party and is not operated by
+     * Cloudflare, so availability is best-effort rather than guaranteed.
+     */
+    private fun startCaravanWarpFallback(reason: String) {
+        if (warpFallbackAttempted) {
+            caravanActive = false
+            caravanSwitching = false
+            connectButton.isEnabled = true
+            connectButton.text = "Повторить автоматический поиск"
+            status.text = "Бесплатные маршруты исчерпаны"
+            showError("Не удалось подключиться", reason)
+            return
+        }
+
+        warpFallbackAttempted = true
+        val session = caravanSessionGeneration
+        caravanActive = false
+        caravanSwitching = true
+        openVpnAttemptActive = false
+        openVpnConnected = false
+        cancelAttemptTimeout()
+        connectButton.isEnabled = false
+        status.text = "VPN Gate не дал рабочего маршрута. Караван проверяет резервный WARP…"
+        runCatching { openVpnEngine?.disconnect() }
+
+        Thread {
+            val result = runCatching {
+                fetchCaravanWarpConfig()
+            }
+            runOnUiThread {
+                if (session != caravanSessionGeneration || isFinishing || isDestroyed) return@runOnUiThread
+                result.onSuccess { config ->
+                    wireGuardConfig = config
+                    pendingOpenVpnProfile = null
+                    activeCaravanServer = null
+                    status.text = "Резервный WARP-профиль получен. Переключаю VPN-движок…"
+                    mainHandler.postDelayed({
+                        if (session != caravanSessionGeneration || isFinishing || isDestroyed) return@postDelayed
+                        caravanSwitching = false
+                        connectButton.isEnabled = true
+                        startWireGuardTunnel()
+                    }, 1_200L)
+                }.onFailure { error ->
+                    caravanSwitching = false
+                    connectButton.isEnabled = true
+                    connectButton.text = "Повторить автоматический поиск"
+                    status.text = "VPN Gate и резервный WARP недоступны"
+                    showError(
+                        "Не удалось найти бесплатный маршрут",
+                        "$reason\\nРезервный WARP тоже не запустился: ${error.message ?: "ошибка профиля или сервиса"}."
+                    )
+                }
+            }
+        }.start()
+    }
+
+    /** Downloads and validates a fresh WARP-compatible profile without showing UI from the worker. */
+    private fun fetchCaravanWarpConfig(): Config {
+        var connection: java.net.HttpURLConnection? = null
+        try {
+            val url = java.net.URL("https://awgconfig.com/api/warp?mode=legacy&count=1&dns=cloudflare")
+            connection = (url.openConnection() as java.net.HttpURLConnection).apply {
+                requestMethod = "GET"
+                connectTimeout = 15_000
+                readTimeout = 20_000
+                setRequestProperty("Accept", "application/json")
+                setRequestProperty("User-Agent", "MATRIX-VPN-Android/0.6.0")
+                instanceFollowRedirects = true
+            }
+            val code = connection.responseCode
+            val stream = if (code in 200..299) connection.inputStream else connection.errorStream
+            val response = stream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }
+                ?: throw IllegalStateException("Сервис не вернул ответ (HTTP $code).")
+            require(response.length <= 1_000_000) { "Ответ сервиса WARP слишком большой." }
+            if (code !in 200..299) throw IllegalStateException("Сервис WARP ответил HTTP $code.")
+            val json = org.json.JSONObject(response)
+            require(json.optBoolean("success", true)) {
+                json.optString("error").ifBlank { "Сервис не смог создать профиль WARP." }
+            }
+            var encoded = json.optString("content")
+            if (encoded.isBlank()) {
+                val configs = json.optJSONArray("configs")
+                if (configs != null && configs.length() > 0) encoded = configs.getJSONObject(0).optString("content")
+            }
+            require(encoded.isNotBlank()) { "Сервис не вернул содержимое профиля." }
+            val profileText = try {
+                String(android.util.Base64.decode(encoded, android.util.Base64.DEFAULT), Charsets.UTF_8)
+            } catch (_: IllegalArgumentException) {
+                encoded
+            }
+            require(profileText.length <= 2_000_000) { "Профиль WARP слишком большой." }
+            require(profileText.contains("[Interface]", ignoreCase = true) &&
+                profileText.contains("[Peer]", ignoreCase = true)) {
+                "Сервис вернул профиль неизвестного формата."
+            }
+            return Config.parse(ByteArrayInputStream(profileText.toByteArray(Charsets.UTF_8)))
+        } finally {
+            connection?.disconnect()
+        }
     }
 
     private fun connectNextCaravanServer() {
         if (!caravanActive || caravanSwitching) return
         val server = caravanQueue?.next()
         if (server == null) {
+            if (!warpFallbackAttempted) {
+                startCaravanWarpFallback("Все проверенные серверы VPN Gate отклонили соединение или не прошли проверку.")
+                return
+            }
             caravanActive = false
             openVpnAttemptActive = false
             openVpnConnected = false
             activeCaravanServer = null
             cancelAttemptTimeout()
+            connectButton.isEnabled = true
             connectButton.text = "Повторить автоматический поиск"
-            status.text = "Караван исчерпал доступные маршруты"
-            showError("Нет рабочего маршрута", "Все найденные серверы были проверены или отклонили соединение. Каталог обновляется при следующей попытке.")
+            status.text = "Караван исчерпал бесплатные маршруты"
+            showError("Нет рабочего маршрута", "VPN Gate и резервный режим WARP не смогли установить рабочее соединение. Проверьте доступ к интернету и повторите попытку.")
             return
         }
 
@@ -501,6 +612,7 @@ class MainActivity : Activity() {
      */
     private fun scoutAlternativeRoutesInBackground() {
         val currentId = activeCaravanServer?.id ?: return
+        val session = caravanSessionGeneration
         if (caravanScoutRunning || lastScoutedRouteId == currentId) return
         val candidates = vpnGateServers.filterNot { it.id == currentId }.take(30)
         if (candidates.isEmpty()) return
@@ -514,7 +626,7 @@ class MainActivity : Activity() {
 
             runOnUiThread {
                 caravanScoutRunning = false
-                if (!caravanActive || activeCaravanServer?.id != currentId) return@runOnUiThread
+                if (session != caravanSessionGeneration || !caravanActive || activeCaravanServer?.id != currentId) return@runOnUiThread
 
                 val reachable = results
                     .filter { it.status == RouteScoutStatus.TCP_REACHABLE }
