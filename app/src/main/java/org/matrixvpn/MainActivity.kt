@@ -28,6 +28,8 @@ import org.matrixvpn.caravan.CaravanAction
 import org.matrixvpn.caravan.CaravanAttemptQueue
 import org.matrixvpn.caravan.CaravanFailure
 import org.matrixvpn.caravan.CaravanRecoveryPolicy
+import org.matrixvpn.caravan.CaravanRouteScout
+import org.matrixvpn.caravan.RouteScoutStatus
 import org.matrixvpn.caravan.VpnGateDirectoryRepository
 import org.matrixvpn.caravan.VpnGateServer
 import org.matrixvpn.network.NetworkWatcher
@@ -58,6 +60,8 @@ class MainActivity : Activity() {
     private var pendingOpenVpnProfile: String? = null
     private var attemptTimeout: Runnable? = null
     private var activeCaravanServer: VpnGateServer? = null
+    private var lastScoutedRouteId: String? = null
+    private var caravanScoutRunning = false
     private val tunnelActions = object : TunnelActionHandler {
         override fun runPreUp(scripts: MutableCollection<String>) {}
         override fun runPostUp(scripts: MutableCollection<String>) {}
@@ -447,8 +451,9 @@ class MainActivity : Activity() {
                         runOnUiThread {
                             if (probe.reachable) {
                                 openVpnConnected = true
-                                status.text = "VPN подключён через ${activeCaravanServer?.country ?: "OpenVPN-профиль"}\n${probe.message}\nКараван продолжает следить за маршрутом."
+                                status.text = "VPN подключён через ${activeCaravanServer?.country ?: "OpenVPN-профиль"}\n${probe.message}\nКараван проверяет запасные маршруты."
                                 connectButton.text = "Отключить VPN"
+                                if (caravanActive) scoutAlternativeRoutesInBackground()
                             } else if (caravanActive) {
                                 failoverCaravan(CaravanFailure.EGRESS_CHECK_FAILED, probe.message)
                             } else {
@@ -487,6 +492,46 @@ class MainActivity : Activity() {
                 }
             }
         }
+    }
+
+    /**
+     * Tests alternate TCP endpoints over the physical network while the
+     * active tunnel remains connected. UDP profiles are never classified
+     * as blocked by this TCP-only preflight.
+     */
+    private fun scoutAlternativeRoutesInBackground() {
+        val currentId = activeCaravanServer?.id ?: return
+        if (caravanScoutRunning || lastScoutedRouteId == currentId) return
+        val candidates = vpnGateServers.filterNot { it.id == currentId }.take(30)
+        if (candidates.isEmpty()) return
+
+        caravanScoutRunning = true
+        lastScoutedRouteId = currentId
+        Thread {
+            val results = runCatching {
+                CaravanRouteScout(applicationContext).scout(candidates)
+            }.getOrElse { emptyList() }
+
+            runOnUiThread {
+                caravanScoutRunning = false
+                if (!caravanActive || activeCaravanServer?.id != currentId) return@runOnUiThread
+
+                val reachable = results
+                    .filter { it.status == RouteScoutStatus.TCP_REACHABLE }
+                    .sortedBy { it.latencyMillis ?: Long.MAX_VALUE }
+                    .map { it.serverId }
+                caravanQueue?.prioritize(reachable)
+
+                val udpCount = results.count { it.status == RouteScoutStatus.UDP_OR_UNSPECIFIED }
+                val reachableCount = reachable.size
+                val message = when {
+                    results.isEmpty() -> "Разведка запасных маршрутов недоступна."
+                    reachableCount > 0 -> "Разведка: TCP доступны $reachableCount; UDP/непроверенных: $udpCount."
+                    else -> "TCP-маршруты не подтверждены; UDP и непроверенные узлы остаются в очереди."
+                }
+                status.text = "VPN подключён через ${activeCaravanServer?.country ?: "OpenVPN"}\\n$message\\nОсновной туннель не переключался."
+            }
+        }.start()
     }
 
     private fun failoverCaravan(failure: CaravanFailure, reason: String) {
