@@ -55,3 +55,17 @@ Test the final APK on the target Realme Note 50 and other supported Android vers
 ## Version and toolchain
 
 This development branch targets app version `0.6.0-caravan` (version code 7), Android Gradle Plugin 8.13.2, Kotlin 2.2.21, Gradle 8.13 in CI, and Android SDK 36.
+
+
+## Android TV edition
+
+The `feat/android-tv-matrix` branch provides a separate TV package (`org.matrixvpn.tv`) using the same Caravan VPN engines and route logic. It adds a landscape 10-foot interface, large D-pad focusable controls, Leanback launcher registration and a TV banner. It keeps Android 8.0/API 26 as the minimum; the TCL television reported by the project owner runs an Android 9/Pie-based Union TV build. The TV APK targets Android 9/API 28 for compatibility with that older platform. Install and VPN service behavior still require validation on the physical TCL TV.
+
+Build with:
+
+```bash
+git clone --branch feat/android-tv-matrix https://github.com/sultanxan222222-sudo/Matrix.git
+cd Matrix
+git submodule update --init --recursive
+gradle testDebugUnitTest assembleDebug
+```
