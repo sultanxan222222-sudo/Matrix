@@ -6,11 +6,11 @@ android {
     namespace = "org.matrixvpn"
     compileSdk = 36
     defaultConfig {
-        applicationId = "org.matrixvpn"
+        applicationId = "org.matrixvpn.tv"
         minSdk = 26
-        targetSdk = 35
-        versionCode = 7
-        versionName = "0.6.0-caravan"
+        targetSdk = 28
+        versionCode = 8
+        versionName = "0.6.0-caravan-tv"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     compileOptions {
