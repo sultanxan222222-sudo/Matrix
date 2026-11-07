@@ -99,11 +99,11 @@ class MainActivity : Activity() {
             setOnClickListener { chooseVpnProfile() }
         }
         val findWireGuardButton = Button(this).apply {
-            text = "WARP — отдельный режим"
+            text = "Автонастройка и подключение"
             setOnClickListener { fetchFreeWarpProfile() }
         }
         val findVpnButton = Button(this).apply {
-            text = "3. Найти бесплатные VPN-серверы"
+            text = "Каталог VPN Gate (OpenVPN)"
             setOnClickListener { searchVpnServices() }
         }
         val pasteButton = Button(this).apply {
@@ -188,7 +188,7 @@ class MainActivity : Activity() {
 
     /** Fetches a fresh free Cloudflare WARP-compatible WireGuard profile from the public generator API. */
     private fun fetchFreeWarpProfile() {
-        status.text = "Получение бесплатного профиля WARP…"
+        status.text = "Поиск бесплатного подключения WARP…"
         connectButton.isEnabled = false
         Thread {
             var connection: java.net.HttpURLConnection? = null
@@ -230,7 +230,10 @@ class MainActivity : Activity() {
                 runOnUiThread {
                     processProfileText(profileText)
                     if (wireGuardConfig != null) {
-                        status.text = "Бесплатный профиль WARP готов\nVPN-туннель: отключён\nНажмите «Подключить VPN»."
+                        status.status.text = "Профиль WARP получен. Запрашиваю разрешение Android…"
+                        val prepareIntent = VpnService.prepare(this)
+                        if (prepareIntent != null) startActivityForResult(prepareIntent, vpnPermissionRequest)
+                        else startWireGuardTunnel()
                     }
                 }
             } catch (e: Exception) {
