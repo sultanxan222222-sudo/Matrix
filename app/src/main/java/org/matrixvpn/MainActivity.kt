@@ -230,7 +230,7 @@ class MainActivity : Activity() {
                 runOnUiThread {
                     processProfileText(profileText)
                     if (wireGuardConfig != null) {
-                        status.status.text = "Профиль WARP получен. Запрашиваю разрешение Android…"
+                        status.text = "Профиль WARP получен. Запрашиваю разрешение Android…"
                         val prepareIntent = VpnService.prepare(this)
                         if (prepareIntent != null) startActivityForResult(prepareIntent, vpnPermissionRequest)
                         else startWireGuardTunnel()
