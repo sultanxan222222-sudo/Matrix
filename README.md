@@ -16,7 +16,7 @@ The current app version is 0.5.1. The build toolchain uses Android Gradle Plugin
 
 ## Security notes
 
-- Profile text is kept in memory by the current import flow and is not saved by MATRIX.
+- The last supported WireGuard/AmneziaWG profile is encrypted with an AES-GCM key in Android Keystore and restored after the app is reopened. MATRIX does not auto-connect without the user's explicit action.
 - A server address alone is only a candidate hint; it does not contain the keys or settings needed to authenticate a tunnel.
 - Use only VPN profiles and servers you are authorized to use.
 - MATRIX does not disable certificate checks or implement custom cryptography.
