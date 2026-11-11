@@ -158,6 +158,7 @@ class MainActivity : Activity() {
         networkWatcher = NetworkWatcher(this) { state ->
             runOnUiThread { networkStatus.text = state.summary() }
         }
+        restoreSavedProfile()
     }
 
     override fun onStart() {
@@ -529,6 +530,30 @@ class MainActivity : Activity() {
         }.start()
     }
 
+    /**
+     * Restores the last supported profile after process/app restart.
+     * The tunnel is deliberately not started automatically: Android VPN consent remains explicit.
+     */
+    private fun restoreSavedProfile() {
+        val saved = SecureProfileStore.load(this) ?: return
+        try {
+            val inspected = VpnProfileInspector.inspect(saved)
+            require(
+                inspected.format == ImportedVpnProfile.Format.WIREGUARD ||
+                    inspected.format == ImportedVpnProfile.Format.AMNEZIAWG
+            ) { "Сохранённый профиль больше не поддерживается." }
+            wireGuardConfig = Config.parse(ByteArrayInputStream(saved.toByteArray(Charsets.UTF_8)))
+            connectButton.isEnabled = true
+            status.text = "Сохранённый профиль восстановлен\nVPN-туннель: отключён\nНажмите «Подключить VPN» для нового подключения."
+        } catch (e: Exception) {
+            SecureProfileStore.clear(this)
+            wireGuardConfig = null
+            connectButton.isEnabled = false
+            status.text = "Сохранённый профиль повреждён или больше не поддерживается."
+            showError("Не удалось восстановить профиль", e.message ?: "Импортируйте конфигурацию заново.")
+        }
+    }
+
     private fun showError(title: String, message: String) {
         AlertDialog.Builder(this).setTitle(title).setMessage(message).setPositiveButton("Понятно", null).show()
     }
@@ -572,6 +597,15 @@ class MainActivity : Activity() {
                 }
             }
             connectButton.isEnabled = wireGuardConfig != null
+            if (wireGuardConfig != null) {
+                try {
+                    SecureProfileStore.save(this, profileText)
+                } catch (e: Exception) {
+                    showError("Профиль готов, но не сохранён", "Не удалось записать профиль в защищённое хранилище устройства. После закрытия приложения его может понадобиться импортировать снова. Подробности: ${e.message ?: "ошибка хранилища"}")
+                }
+            } else {
+                SecureProfileStore.clear(this)
+            }
             val endpointText = if (profile.endpointHints.isEmpty()) "Адрес сервера не найден" else profile.endpointHints.joinToString("\n")
             val details = buildString {
                 append("Определённый формат: ").append(formatLabel).append("\n")
@@ -582,7 +616,7 @@ class MainActivity : Activity() {
                 else if (wireGuardConfig != null) append("Конфигурация WireGuard проверена. Теперь можно запросить разрешение Android и подключиться.")
                 else if (profile.format == ImportedVpnProfile.Format.OPENVPN) append("Профиль OpenVPN распознан, но модуль для подключения OpenVPN пока не встроен.")
                 else append("Подходящая конфигурация WireGuard/AmneziaWG не загружена.")
-                append("\n\nВ этой версии профиль хранится только в памяти и не сохраняется приложением MATRIX.")
+                append("\n\nПоддерживаемый профиль WireGuard/AmneziaWG сохраняется в зашифрованном хранилище Android Keystore и восстанавливается при следующем запуске. Автоподключение без подтверждения пользователя не выполняется.")
             }
             status.text = if (wireGuardConfig != null) "Профиль $formatLabel готов\nVPN-туннель: отключён"
             else "Профиль проверен: $formatLabel\nVPN-туннель: отключён"
