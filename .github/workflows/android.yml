@@ -42,9 +42,11 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y clang libclang-dev cmake ninja-build zip
 
+      - name: Configure Android NDK environment
+        run: echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
+
       - name: Build embedded OpenVPN 3 Core for ARM64
         env:
-          ANDROID_NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/27.2.12479018
           ANDROID_PLATFORM: android-26
         run: |
           set -euxo pipefail
