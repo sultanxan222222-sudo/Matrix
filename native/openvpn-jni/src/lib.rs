@@ -1,7 +1,7 @@
 use std::sync::{Mutex, OnceLock};
 
 use jni::{
-    objects::{GlobalRef, JClass, JObject, JString, JValue},
+    objects::{GlobalRef, JObject, JString, JValue},
     sys::{jboolean, jint, jlong},
     JNIEnv, JavaVM,
 };
@@ -329,7 +329,7 @@ pub extern "system" fn Java_org_matrixvpn_vpn_MatrixVpnService_nativeStart(
 pub extern "system" fn Java_org_matrixvpn_vpn_MatrixVpnService_nativeStop(
     _env: JNIEnv,
     _service: JObject,
-    _unused: JClass,
+    
 ) {
     let client = client_slot().lock().ok().and_then(|active| active.as_ref().cloned());
     if let Some(client) = client {
