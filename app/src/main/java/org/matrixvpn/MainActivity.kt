@@ -90,7 +90,7 @@ class MainActivity : Activity() {
         val connectionHeading = sectionHeading("СОСТОЯНИЕ СОЕДИНЕНИЯ")
         val helpHeading = sectionHeading("СПРАВКА")
         status = TextView(this).apply {
-            text = "Сборка 0.6.0\nVPN-туннель: не подключён\nПулы профилей и резервная проверка доступны"
+            text = "Сборка 0.6.1\nVPN-туннель: не подключён\nПулы профилей и резервная проверка доступны"
             textSize = 16f
             setTextColor(Color.WHITE)
             gravity = Gravity.CENTER
@@ -149,25 +149,43 @@ class MainActivity : Activity() {
             gravity = Gravity.CENTER
             setPadding(8, 12, 8, 12)
         }
-        val menuContent = LinearLayout(this).apply {
+        val modePanel = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            gravity = Gravity.CENTER_HORIZONTAL
-            setPadding(18, 10, 18, 24)
-            setBackgroundColor(Color.rgb(4, 12, 7))
-            addView(title)
-            addView(menuSubtitle)
+            setPadding(14, 8, 14, 14)
+            background = roundedPanel(Color.argb(105, 20, 27, 23), Color.argb(145, 205, 170, 91), 30f)
             addView(modeHeading)
             addView(warpModeButton, menuButtonParams())
             addView(connectButton, menuButtonParams())
+        }
+        val statusPanel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(14, 8, 14, 12)
+            background = roundedPanel(Color.argb(92, 16, 30, 23), Color.argb(105, 104, 137, 91), 24f)
             addView(connectionHeading)
             addView(status, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
             addView(networkStatus, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        }
+        val toolsPanel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(12, 12, 12, 12)
+            background = roundedPanel(Color.argb(82, 17, 29, 22), Color.argb(100, 104, 137, 91), 24f)
             addView(pasteButton, menuButtonParams())
             addView(importButton, menuButtonParams())
             addView(findVpnButton, menuButtonParams())
             addView(findWireGuardButton, menuButtonParams())
             addView(profilesButton, menuButtonParams())
             addView(recoveryButton, menuButtonParams())
+        }
+        val menuContent = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_HORIZONTAL
+            setPadding(16, 12, 16, 30)
+            setBackgroundColor(Color.rgb(3, 9, 7))
+            addView(title)
+            addView(menuSubtitle)
+            addView(modePanel, menuButtonParams())
+            addView(statusPanel, menuButtonParams())
+            addView(toolsPanel, menuButtonParams())
             addView(helpHeading)
             addView(help, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         }
@@ -210,25 +228,35 @@ class MainActivity : Activity() {
 
 
     private fun roundedPanel(fill: Int, stroke: Int, radiusDp: Float): GradientDrawable =
-        GradientDrawable(GradientDrawable.Orientation.TL_BR, intArrayOf(fill, Color.argb(224, 7, 13, 12))).apply {
+        GradientDrawable(GradientDrawable.Orientation.TL_BR, intArrayOf(fill, Color.argb(165, 7, 13, 12))).apply {
             cornerRadius = radiusDp * resources.displayMetrics.density
             setStroke((1.2f * resources.displayMetrics.density).toInt().coerceAtLeast(1), stroke)
         }
 
     private fun styleGlassModeButton(button: Button, active: Boolean) {
-        val gold = if (active) Color.argb(235, 255, 213, 102) else Color.argb(175, 132, 111, 63)
-        val fill = if (active) Color.argb(218, 48, 39, 19) else Color.argb(205, 23, 25, 20)
-        button.background = roundedPanel(fill, gold, 26f)
+        val gold = if (active) Color.argb(245, 255, 218, 125) else Color.argb(205, 164, 139, 83)
+        val fill = if (active) Color.argb(150, 72, 57, 25) else Color.argb(112, 29, 34, 28)
+        button.background = roundedPanel(fill, gold, 32f)
         button.backgroundTintList = null
-        button.setTextColor(if (active) Color.rgb(255, 230, 160) else Color.rgb(218, 207, 175))
-        button.elevation = if (active) 10f * resources.displayMetrics.density else 3f * resources.displayMetrics.density
+        button.setTextColor(if (active) Color.rgb(255, 239, 190) else Color.rgb(232, 220, 190))
+        button.textSize = 19f
+        button.elevation = if (active) 16f * resources.displayMetrics.density else 6f * resources.displayMetrics.density
         button.stateListAnimator = null
+        button.setShadowLayer(if (active) 12f else 3f, 0f, 0f, if (active) Color.rgb(255, 196, 76) else Color.rgb(110, 91, 48))
     }
 
     private fun refreshModeButtons() {
         if (!::warpModeButton.isInitialized || !::connectButton.isInitialized) return
-        styleGlassModeButton(warpModeButton, tunnelUp && activeProfileProvider.equals("WARP", true))
-        styleGlassModeButton(connectButton, tunnelUp && !activeProfileProvider.equals("WARP", true))
+        val warpActive = tunnelUp && activeProfileProvider.equals("WARP", true)
+        val vpnActive = tunnelUp && !activeProfileProvider.equals("WARP", true)
+        styleGlassModeButton(warpModeButton, warpActive)
+        styleGlassModeButton(connectButton, vpnActive)
+        listOf(warpModeButton, connectButton).forEach { button ->
+            button.animate().cancel()
+            button.animate().scaleX(if (button === warpModeButton && warpActive || button === connectButton && vpnActive) 1.015f else 1f)
+                .scaleY(if (button === warpModeButton && warpActive || button === connectButton && vpnActive) 1.015f else 1f)
+                .setDuration(220L).start()
+        }
         warpModeButton.text = if (tunnelUp && activeProfileProvider.equals("WARP", true)) "WARP  •  ОТКЛЮЧИТЬ" else "WARP  •  ВКЛЮЧИТЬ"
         connectButton.text = if (tunnelUp && !activeProfileProvider.equals("WARP", true)) "VPN  •  ОТКЛЮЧИТЬ" else "VPN  •  ВКЛЮЧИТЬ"
     }
@@ -318,7 +346,7 @@ class MainActivity : Activity() {
                             connectTimeout = 20000
                             readTimeout = 30000
                             setRequestProperty("Accept", "application/json")
-                            setRequestProperty("User-Agent", "MATRIX-VPN-Android/0.6.0")
+                            setRequestProperty("User-Agent", "MATRIX-VPN-Android/0.6.1")
                         }
                         val code = connection.responseCode
                         val stream = if (code in 200..299) connection.inputStream else connection.errorStream
