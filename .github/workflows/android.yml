@@ -1,7 +1,7 @@
 name: Android CI
 on:
   push:
-    branches: [main, 'feature/vaynax-hybrid-free-node-pool']
+    branches: [main, 'feature/vaynax-hybrid-free-node-pool', 'feature/openvpn3-embedded-engine']
   pull_request:
     branches: [main]
   workflow_dispatch:
