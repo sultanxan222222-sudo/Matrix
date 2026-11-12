@@ -8,6 +8,7 @@ import android.content.Context
 import android.content.Intent
 import android.net.IpPrefix
 import android.net.VpnService
+import java.net.InetAddress
 import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
