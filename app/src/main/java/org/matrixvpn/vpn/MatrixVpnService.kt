@@ -45,6 +45,7 @@ class MatrixVpnService : VpnService() {
         startForeground(NOTIFICATION_ID, notification("Подключение к VPN…"))
         publishState(STATE_CONNECTING, "Запускается встроенный OpenVPN 3 Core…")
         try {
+            ensureNativeLoaded()
             if (!nativeStart(profile, username, password)) {
                 publishState(STATE_ERROR, "OpenVPN 3 не смог запустить сеанс.")
                 stopForeground(STOP_FOREGROUND_REMOVE)
@@ -60,7 +61,7 @@ class MatrixVpnService : VpnService() {
     private fun stopOpenVpn() {
         try {
             publishState(STATE_DISCONNECTING, "Останавливается OpenVPN…")
-            nativeStop()
+            if (isNativeLoaded()) nativeStop()
             updateNotification("Отключение VPN…")
         } catch (error: Throwable) {
             publishState(STATE_ERROR, error.message ?: "Не удалось остановить OpenVPN.")
@@ -211,7 +212,7 @@ class MatrixVpnService : VpnService() {
 
     override fun onDestroy() {
         try {
-            nativeStop()
+            if (isNativeLoaded()) nativeStop()
         } catch (_: UnsatisfiedLinkError) {
         }
         nativeTeardown(false)
@@ -282,10 +283,17 @@ class MatrixVpnService : VpnService() {
         private const val KEY_MESSAGE = "message"
         private const val CHANNEL_ID = "matrix_openvpn3"
         private const val NOTIFICATION_ID = 4317
+        @Volatile private var nativeLoaded = false
 
-        init {
-            System.loadLibrary("matrix_openvpn")
+        @Synchronized
+        private fun ensureNativeLoaded() {
+            if (!nativeLoaded) {
+                System.loadLibrary("matrix_openvpn")
+                nativeLoaded = true
+            }
         }
+
+        private fun isNativeLoaded(): Boolean = nativeLoaded
 
         fun start(context: Context, profile: String, username: String = "", password: String = "") {
             val intent = Intent(context, MatrixVpnService::class.java).apply {
