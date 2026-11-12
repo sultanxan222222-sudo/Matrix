@@ -80,17 +80,19 @@ class MatrixVpnService : VpnService() {
     fun nativeSetLayer(layer: Int): Boolean = layer == 3
 
     @Synchronized
-    fun nativeAddAddress(address: String, prefix: Int, gateway: String, ipv6: Boolean, net30: Boolean): Boolean =
-        try {
-            (tunnelBuilder ?: return false).addAddress(address, prefix)
+    fun nativeAddAddress(address: String, prefix: Int, gateway: String, ipv6: Boolean, net30: Boolean): Boolean {
+        return try {
+            val builder = tunnelBuilder ?: return false
+            builder.addAddress(address, prefix)
             true
         } catch (_: Exception) {
             false
         }
+    }
 
     @Synchronized
-    fun nativeRerouteGateway(ipv4: Boolean, ipv6: Boolean, flags: Int): Boolean =
-        try {
+    fun nativeRerouteGateway(ipv4: Boolean, ipv6: Boolean, flags: Int): Boolean {
+        return try {
             val builder = tunnelBuilder ?: return false
             if (ipv4) builder.addRoute("0.0.0.0", 0)
             if (ipv6) builder.addRoute("::", 0)
@@ -98,56 +100,65 @@ class MatrixVpnService : VpnService() {
         } catch (_: Exception) {
             false
         }
+    }
 
     @Synchronized
-    fun nativeAddRoute(address: String, prefix: Int, metric: Int, ipv6: Boolean): Boolean =
-        try {
-            (tunnelBuilder ?: return false).addRoute(address, prefix)
+    fun nativeAddRoute(address: String, prefix: Int, metric: Int, ipv6: Boolean): Boolean {
+        return try {
+            val builder = tunnelBuilder ?: return false
+            builder.addRoute(address, prefix)
             true
         } catch (_: Exception) {
             false
         }
+    }
 
     @Synchronized
-    fun nativeExcludeRoute(address: String, prefix: Int, metric: Int, ipv6: Boolean): Boolean =
-        try {
-            // Android's native route exclusion API is available from API 33.
+    fun nativeExcludeRoute(address: String, prefix: Int, metric: Int, ipv6: Boolean): Boolean {
+        return try {
             if (Build.VERSION.SDK_INT < 33) return false
-            (tunnelBuilder ?: return false).excludeRoute(IpPrefix(address, prefix))
+            val builder = tunnelBuilder ?: return false
+            builder.excludeRoute(IpPrefix(address, prefix))
             true
         } catch (_: Exception) {
             false
         }
+    }
 
     @Synchronized
-    fun nativeSetDnsServers(addresses: String): Boolean =
-        try {
+    fun nativeSetDnsServers(addresses: String): Boolean {
+        return try {
             val builder = tunnelBuilder ?: return false
             addresses.split(';').map(String::trim).filter(String::isNotEmpty).distinct()
-                .forEach(builder::addDnsServer)
+                .forEach { builder.addDnsServer(it) }
             true
         } catch (_: Exception) {
             false
         }
+    }
 
     @Synchronized
-    fun nativeSetMtu(mtu: Int): Boolean =
-        try {
+    fun nativeSetMtu(mtu: Int): Boolean {
+        return try {
             if (mtu !in 576..9000) return false
-            (tunnelBuilder ?: return false).setMtu(mtu)
+            val builder = tunnelBuilder ?: return false
+            builder.setMtu(mtu)
             true
         } catch (_: Exception) {
             false
         }
+    }
 
     @Synchronized
-    fun nativeSetSessionName(name: String): Boolean =
-        try {
-            (tunnelBuilder ?: return false).setSession(name.take(64))
+    fun nativeSetSessionName(name: String): Boolean {
+        return try {
+            val builder = tunnelBuilder ?: return false
+            builder.setSession(name.take(64))
             true
         } catch (_: Exception) {
             false
         }
+    }
 
     /** Transfers ownership of the established TUN descriptor to OpenVPN 3 Core. */
     @Synchronized
