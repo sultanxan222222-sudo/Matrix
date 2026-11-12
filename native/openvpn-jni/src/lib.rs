@@ -16,7 +16,13 @@ struct AndroidBridge {
 impl AndroidBridge {
     fn with_env<R>(&self, f: impl FnOnce(&mut JNIEnv<'_>) -> jni::errors::Result<R>) -> Option<R> {
         let mut env = self.vm.attach_current_thread().ok()?;
-        f(&mut env).ok()
+        match f(&mut env) {
+            Ok(value) => Some(value),
+            Err(_) => {
+                let _ = env.exception_clear();
+                None
+            }
+        }
     }
 
     fn bool0(&self, method: &str) -> bool {
