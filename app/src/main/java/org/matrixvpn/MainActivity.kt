@@ -6,6 +6,7 @@ import android.content.Intent
 import android.content.ClipboardManager
 import android.content.res.ColorStateList
 import android.graphics.Color
+import android.graphics.drawable.GradientDrawable
 import android.net.VpnService
 import android.net.Uri
 import android.os.Bundle
@@ -36,6 +37,7 @@ class MainActivity : Activity() {
     private lateinit var status: TextView
     private lateinit var networkStatus: TextView
     private lateinit var connectButton: Button
+    private lateinit var warpModeButton: Button
     private lateinit var networkWatcher: NetworkWatcher
     private val pickProfileRequest = 4102
     private val vpnPermissionRequest = 4103
@@ -62,7 +64,7 @@ class MainActivity : Activity() {
                 } else {
                     "VPN-туннель: отключён\nАктивный профиль: $activeProfileName"
                 }
-                connectButton.text = if (tunnelUp) "Отключить VPN" else "Подключить VPN"
+                refreshModeButtons()
             }
         }
         override fun isIpv4ResolutionPreferred(): Boolean = true
@@ -79,7 +81,7 @@ class MainActivity : Activity() {
             setPadding(8, 18, 8, 8)
         }
         val menuSubtitle = TextView(this).apply {
-            text = "HYBRID VPN CONTROL • ВЕРСИЯ 0.6.0"
+            text = "HYBRID VPN CONTROL • ВЕРСИЯ 0.6.1"
             textSize = 12f
             setTextColor(Color.rgb(130, 220, 150))
             gravity = Gravity.CENTER
@@ -100,6 +102,14 @@ class MainActivity : Activity() {
             setTextColor(Color.rgb(180, 210, 185))
             gravity = Gravity.CENTER
             setPadding(8, 8, 8, 12)
+        }
+        val modeHeading = sectionHeading("РЕЖИМ ПОДКЛЮЧЕНИЯ")
+        warpModeButton = Button(this).apply {
+            text = "WARP  •  ВКЛЮЧИТЬ"
+            isAllCaps = false
+            textSize = 17f
+            minHeight = (76 * resources.displayMetrics.density).toInt()
+            setOnClickListener { onWarpModeClick() }
         }
         val importButton = Button(this).apply {
             text = "2. Импорт файла с телефона"
@@ -126,12 +136,15 @@ class MainActivity : Activity() {
             setOnClickListener { importFromClipboard() }
         }
         connectButton = Button(this).apply {
-            text = "Подключить VPN"
+            text = "VPN  •  ВКЛЮЧИТЬ"
             isEnabled = false
-            setOnClickListener { connectOrDisconnect() }
+            isAllCaps = false
+            textSize = 17f
+            minHeight = (76 * resources.displayMetrics.density).toInt()
+            setOnClickListener { onVpnModeClick() }
         }
         val help = TextView(this).apply {
-            text = "WARP — отдельный режим получения WARP-совместимого WireGuard/AWG-профиля через сторонний генератор (это не официальный API Cloudflare). MATRIX хранит несколько профилей в зашифрованном Android Keystore, оценивает их по HTTPS-проверкам и может переключаться на резервный профиль только при включённом системном Always-on VPN и блокировке соединений без VPN. VPN Gate даёт OpenVPN-профили для внешнего OpenVPN-клиента; встроенный движок MATRIX подключает WireGuard/AmneziaWG."
+            text = "WARP и VPN имеют отдельные кнопки управления. WARP-профили создаются через сторонний генератор (не официальный API Cloudflare). MATRIX хранит профили в зашифрованном Android Keystore. Резервное переключение доступно только при включённых Always-on VPN и блокировке соединений без VPN. VPN Gate выдаёт OpenVPN-профили для внешнего клиента; встроенный движок подключает WireGuard/AmneziaWG."
             textSize = 13f
             gravity = Gravity.CENTER
             setPadding(8, 12, 8, 12)
@@ -143,6 +156,9 @@ class MainActivity : Activity() {
             setBackgroundColor(Color.rgb(4, 12, 7))
             addView(title)
             addView(menuSubtitle)
+            addView(modeHeading)
+            addView(warpModeButton, menuButtonParams())
+            addView(connectButton, menuButtonParams())
             addView(connectionHeading)
             addView(status, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
             addView(networkStatus, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
@@ -152,7 +168,6 @@ class MainActivity : Activity() {
             addView(findWireGuardButton, menuButtonParams())
             addView(profilesButton, menuButtonParams())
             addView(recoveryButton, menuButtonParams())
-            addView(connectButton, menuButtonParams())
             addView(helpHeading)
             addView(help, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         }
@@ -161,12 +176,17 @@ class MainActivity : Activity() {
             setBackgroundColor(Color.rgb(4, 12, 7))
             addView(menuContent, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         }
-        listOf(importButton, findWireGuardButton, findVpnButton, pasteButton, profilesButton, recoveryButton, connectButton).forEach { button ->
-            button.backgroundTintList = ColorStateList.valueOf(Color.rgb(0, 110, 40))
-            button.setTextColor(Color.WHITE)
+        listOf(importButton, findWireGuardButton, findVpnButton, pasteButton, profilesButton, recoveryButton).forEach { button ->
+            button.background = roundedPanel(Color.rgb(15, 34, 25), Color.rgb(72, 92, 53), 16f)
+            button.backgroundTintList = null
+            button.setTextColor(Color.rgb(245, 239, 215))
             button.textSize = 14f
-            button.minHeight = (48 * resources.displayMetrics.density).toInt()
+            button.minHeight = (50 * resources.displayMetrics.density).toInt()
+            button.isAllCaps = false
+            button.elevation = 0f
         }
+        styleGlassModeButton(warpModeButton, false)
+        styleGlassModeButton(connectButton, false)
         help.setTextColor(Color.rgb(170, 220, 180))
         setContentView(MatrixRainView(this))
         window.decorView.postDelayed({
@@ -188,6 +208,79 @@ class MainActivity : Activity() {
         super.onStop()
     }
 
+
+    private fun roundedPanel(fill: Int, stroke: Int, radiusDp: Float): GradientDrawable =
+        GradientDrawable(GradientDrawable.Orientation.TL_BR, intArrayOf(fill, Color.rgb(7, 13, 12))).apply {
+            cornerRadius = radiusDp * resources.displayMetrics.density
+            setStroke((1.2f * resources.displayMetrics.density).toInt().coerceAtLeast(1), stroke)
+        }
+
+    private fun styleGlassModeButton(button: Button, active: Boolean) {
+        val gold = if (active) Color.rgb(255, 213, 102) else Color.rgb(132, 111, 63)
+        val fill = if (active) Color.rgb(48, 39, 19) else Color.rgb(23, 25, 20)
+        button.background = roundedPanel(fill, gold, 26f)
+        button.backgroundTintList = null
+        button.setTextColor(if (active) Color.rgb(255, 230, 160) else Color.rgb(218, 207, 175))
+        button.elevation = if (active) 10f * resources.displayMetrics.density else 3f * resources.displayMetrics.density
+        button.stateListAnimator = null
+    }
+
+    private fun refreshModeButtons() {
+        if (!::warpModeButton.isInitialized || !::connectButton.isInitialized) return
+        styleGlassModeButton(warpModeButton, tunnelUp && activeProfileProvider.equals("WARP", true))
+        styleGlassModeButton(connectButton, tunnelUp && !activeProfileProvider.equals("WARP", true))
+        warpModeButton.text = if (tunnelUp && activeProfileProvider.equals("WARP", true)) "WARP  •  ОТКЛЮЧИТЬ" else "WARP  •  ВКЛЮЧИТЬ"
+        connectButton.text = if (tunnelUp && !activeProfileProvider.equals("WARP", true)) "VPN  •  ОТКЛЮЧИТЬ" else "VPN  •  ВКЛЮЧИТЬ"
+    }
+
+    private fun onWarpModeClick() {
+        if (tunnelUp) {
+            if (activeProfileProvider.equals("WARP", true)) connectOrDisconnect()
+            else showError("VPN уже активен", "Сначала отключите текущий VPN, затем включите WARP.")
+            return
+        }
+        val profiles = SecureProfileVault.list(this).filter { it.provider.equals("WARP", true) }
+        if (profiles.isEmpty()) fetchFreeWarpProfile() else showSavedModeProfiles(profiles, "WARP")
+    }
+
+    private fun onVpnModeClick() {
+        if (tunnelUp) {
+            if (!activeProfileProvider.equals("WARP", true)) connectOrDisconnect()
+            else showError("WARP уже активен", "Сначала отключите WARP, затем включите VPN.")
+            return
+        }
+        val profiles = SecureProfileVault.list(this).filter { !it.provider.equals("WARP", true) }
+        if (profiles.isEmpty()) {
+            showError("Нет VPN-профиля", "Импортируйте WireGuard/AmneziaWG-файл или вставьте конфигурацию. После этого отдельная кнопка VPN сможет подключиться.")
+            return
+        }
+        showSavedModeProfiles(profiles, "VPN")
+    }
+
+    private fun showSavedModeProfiles(profiles: List<org.matrixvpn.profile.SavedVpnProfile>, mode: String) {
+        AlertDialog.Builder(this)
+            .setTitle(if (mode == "WARP") "ВЫБОР WARP-ПРОФИЛЯ" else "ВЫБОР VPN-ПРОФИЛЯ")
+            .setItems(profiles.map { it.name }.toTypedArray()) { _, which ->
+                try {
+                    val chosen = profiles[which]
+                    val raw = SecureProfileVault.load(this, chosen.id)
+                        ?: throw IllegalStateException("Не удалось прочитать сохранённый профиль.")
+                    wireGuardConfig = Config.parse(ByteArrayInputStream(raw.toByteArray(Charsets.UTF_8)))
+                    activeProfileId = chosen.id
+                    activeProfileName = chosen.name
+                    activeProfileProvider = chosen.provider
+                    SecureProfileVault.setActive(this, chosen.id)
+                    connectButton.isEnabled = true
+                    status.text = "$mode • выбран профиль: \${chosen.name}\nЗапрашиваю разрешение Android…"
+                    val permission = VpnService.prepare(this)
+                    if (permission != null) startActivityForResult(permission, vpnPermissionRequest) else startWireGuardTunnel()
+                } catch (e: Exception) {
+                    showError("Не удалось выбрать профиль", e.message ?: "Проверьте конфигурацию и попробуйте снова.")
+                }
+            }
+            .setNegativeButton("Отмена", null)
+            .show()
+    }
 
     private fun sectionHeading(label: String): TextView = TextView(this).apply {
         text = label
