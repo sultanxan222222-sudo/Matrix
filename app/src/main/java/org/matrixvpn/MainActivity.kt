@@ -4,6 +4,9 @@ import android.app.Activity
 import android.app.AlertDialog
 import android.content.Intent
 import android.content.ClipboardManager
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.IntentFilter
 import android.content.res.ColorStateList
 import android.graphics.Color
 import android.graphics.drawable.GradientDrawable
@@ -30,6 +33,8 @@ import org.matrixvpn.network.TunnelConnectivityProbe
 import org.matrixvpn.profile.ImportedVpnProfile
 import org.matrixvpn.profile.VpnProfileInspector
 import org.matrixvpn.profile.SecureProfileVault
+import org.matrixvpn.vpn.MatrixVpnService
+import androidx.core.content.ContextCompat
 import org.matrixvpn.recovery.NodeHealthStore
 import java.io.ByteArrayInputStream
 
@@ -53,6 +58,27 @@ class MainActivity : Activity() {
     private var activeProfileId: String? = null
     private var activeProfileName: String = "Нет профиля"
     private var activeProfileProvider: String = "Импорт"
+    private var openVpnProfileText: String? = null
+    private var pendingOpenVpnStart = false
+    private var openVpnRunning = false
+    private var openVpnState: String = MatrixVpnService.STATE_DISCONNECTED
+    private var openVpnReceiverRegistered = false
+    private val openVpnStatusReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            openVpnState = intent?.getStringExtra(MatrixVpnService.EXTRA_STATE)
+                ?: MatrixVpnService.currentState(this@MainActivity)
+            openVpnRunning = openVpnState == MatrixVpnService.STATE_CONNECTING ||
+                openVpnState == MatrixVpnService.STATE_CONNECTED ||
+                openVpnState == MatrixVpnService.STATE_DISCONNECTING
+            val message = intent?.getStringExtra(MatrixVpnService.EXTRA_MESSAGE).orEmpty()
+            if (openVpnRunning || openVpnState == MatrixVpnService.STATE_ERROR) {
+                status.text = "Встроенный OpenVPN 3 • $openVpnState\n$message"
+            }
+            connectButton.isEnabled = openVpnState != MatrixVpnService.STATE_CONNECTING &&
+                openVpnState != MatrixVpnService.STATE_DISCONNECTING
+            refreshModeButtons()
+        }
+    }
 
     private val matrixTunnel = object : Tunnel {
         override fun getName(): String = "matrix"
@@ -227,16 +253,31 @@ class MainActivity : Activity() {
         networkWatcher = NetworkWatcher(this) { state ->
             runOnUiThread { networkStatus.text = state.summary() }
         }
+        openVpnState = MatrixVpnService.currentState(this)
+        openVpnRunning = openVpnState == MatrixVpnService.STATE_CONNECTING ||
+            openVpnState == MatrixVpnService.STATE_CONNECTED ||
+            openVpnState == MatrixVpnService.STATE_DISCONNECTING
         restoreSavedProfile()
     }
 
     override fun onStart() {
         super.onStart()
         networkWatcher.start()
+        if (!openVpnReceiverRegistered) {
+            ContextCompat.registerReceiver(
+                this, openVpnStatusReceiver, IntentFilter(MatrixVpnService.ACTION_STATUS),
+                ContextCompat.RECEIVER_NOT_EXPORTED
+            )
+            openVpnReceiverRegistered = true
+        }
     }
 
     override fun onStop() {
         networkWatcher.stop()
+        if (openVpnReceiverRegistered) {
+            try { unregisterReceiver(openVpnStatusReceiver) } catch (_: Exception) { }
+            openVpnReceiverRegistered = false
+        }
         super.onStop()
     }
 
@@ -277,20 +318,29 @@ class MainActivity : Activity() {
     private fun refreshModeButtons() {
         if (!::warpModeButton.isInitialized || !::connectButton.isInitialized) return
         val warpActive = tunnelUp && activeProfileProvider.equals("WARP", true)
-        val vpnActive = tunnelUp && !activeProfileProvider.equals("WARP", true)
+        val vpnActive = openVpnRunning || (tunnelUp && !activeProfileProvider.equals("WARP", true))
         styleGlassModeButton(warpModeButton, warpActive)
         styleGlassModeButton(connectButton, vpnActive)
         listOf(warpModeButton, connectButton).forEach { button ->
             button.animate().cancel()
-            button.animate().scaleX(if (button === warpModeButton && warpActive || button === connectButton && vpnActive) 1.015f else 1f)
-                .scaleY(if (button === warpModeButton && warpActive || button === connectButton && vpnActive) 1.015f else 1f)
-                .setDuration(220L).start()
+            val selected = (button === warpModeButton && warpActive) || (button === connectButton && vpnActive)
+            button.animate().scaleX(if (selected) 1.015f else 1f)
+                .scaleY(if (selected) 1.015f else 1f).setDuration(220L).start()
         }
-        warpModeButton.text = if (tunnelUp && activeProfileProvider.equals("WARP", true)) "WARP  •  ОТКЛЮЧИТЬ" else "WARP  •  ВКЛЮЧИТЬ"
-        connectButton.text = if (tunnelUp && !activeProfileProvider.equals("WARP", true)) "VPN  •  ОТКЛЮЧИТЬ" else "VPN  •  ПОИСК / ВКЛЮЧИТЬ"
+        warpModeButton.text = if (warpActive) "WARP  •  ОТКЛЮЧИТЬ" else "WARP  •  ВКЛЮЧИТЬ"
+        connectButton.text = when {
+            openVpnRunning && openVpnState == MatrixVpnService.STATE_DISCONNECTING -> "VPN  •  ОТКЛЮЧЕНИЕ…"
+            openVpnRunning -> "VPN  •  ОТКЛЮЧИТЬ"
+            tunnelUp && !activeProfileProvider.equals("WARP", true) -> "VPN  •  ОТКЛЮЧИТЬ"
+            else -> "VPN  •  ПОИСК / ВКЛЮЧИТЬ"
+        }
     }
 
-    private fun onWarpModeClick() {
+        private fun onWarpModeClick() {
+        if (openVpnRunning) {
+            showError("VPN уже активен", "Сначала отключите OpenVPN 3, затем включите WARP.")
+            return
+        }
         if (tunnelUp) {
             if (activeProfileProvider.equals("WARP", true)) connectOrDisconnect()
             else showError("VPN уже активен", "Сначала отключите текущий VPN, затем включите WARP.")
@@ -300,7 +350,11 @@ class MainActivity : Activity() {
         if (profiles.isEmpty()) fetchFreeWarpProfile() else showSavedModeProfiles(profiles, "WARP")
     }
 
-    private fun onVpnModeClick() {
+        private fun onVpnModeClick() {
+        if (openVpnRunning) {
+            MatrixVpnService.stop(this)
+            return
+        }
         if (tunnelUp) {
             if (!activeProfileProvider.equals("WARP", true)) connectOrDisconnect()
             else showError("WARP уже активен", "Сначала отключите WARP, затем включите VPN.")
@@ -308,22 +362,19 @@ class MainActivity : Activity() {
         }
         val profiles = SecureProfileVault.list(this).filter { !it.provider.equals("WARP", true) }
         if (profiles.isEmpty()) {
-            // The primary VPN control must actually discover servers when the user's VPN pool is empty.
-            // VPN Gate currently publishes OpenVPN profiles; MATRIX hands those to a compatible
-            // external OpenVPN app instead of pretending its WireGuard/AWG engine can run them.
             searchVpnServices()
             return
         }
         AlertDialog.Builder(this)
             .setTitle("РЕЖИМ VPN")
-            .setItems(arrayOf("Мои профили WireGuard / AmneziaWG (${profiles.size})", "Найти бесплатные VPN-серверы")) { _, which ->
+            .setItems(arrayOf("Мои профили MATRIX (${profiles.size})", "Найти бесплатные VPN-серверы")) { _, which ->
                 if (which == 0) showSavedModeProfiles(profiles, "VPN") else searchVpnServices()
             }
             .setNegativeButton("Отмена", null)
             .show()
     }
 
-    private fun showSavedModeProfiles(profiles: List<org.matrixvpn.profile.SavedVpnProfile>, mode: String) {
+        private fun showSavedModeProfiles(profiles: List<org.matrixvpn.profile.SavedVpnProfile>, mode: String) {
         AlertDialog.Builder(this)
             .setTitle(if (mode == "WARP") "ВЫБОР WARP-ПРОФИЛЯ" else "ВЫБОР VPN-ПРОФИЛЯ")
             .setItems(profiles.map { it.name }.toTypedArray()) { _, which ->
@@ -331,7 +382,20 @@ class MainActivity : Activity() {
                     val chosen = profiles[which]
                     val raw = SecureProfileVault.load(this, chosen.id)
                         ?: throw IllegalStateException("Не удалось прочитать сохранённый профиль.")
-                    wireGuardConfig = Config.parse(ByteArrayInputStream(raw.toByteArray(Charsets.UTF_8)))
+                    val inspected = VpnProfileInspector.inspect(raw)
+                    when (inspected.format) {
+                        ImportedVpnProfile.Format.OPENVPN -> {
+                            openVpnProfileText = raw
+                            wireGuardConfig = null
+                            pendingOpenVpnStart = true
+                        }
+                        ImportedVpnProfile.Format.WIREGUARD, ImportedVpnProfile.Format.AMNEZIAWG -> {
+                            openVpnProfileText = null
+                            wireGuardConfig = Config.parse(ByteArrayInputStream(raw.toByteArray(Charsets.UTF_8)))
+                            pendingOpenVpnStart = false
+                        }
+                        else -> throw IllegalArgumentException("Формат профиля не поддерживается.")
+                    }
                     activeProfileId = chosen.id
                     activeProfileName = chosen.name
                     activeProfileProvider = chosen.provider
@@ -339,7 +403,8 @@ class MainActivity : Activity() {
                     connectButton.isEnabled = true
                     status.text = "$mode • выбран профиль: ${chosen.name}\nЗапрашиваю разрешение Android…"
                     val permission = VpnService.prepare(this)
-                    if (permission != null) startActivityForResult(permission, vpnPermissionRequest) else startWireGuardTunnel()
+                    if (permission != null) startActivityForResult(permission, vpnPermissionRequest)
+                    else startSelectedVpnTunnel()
                 } catch (e: Exception) {
                     showError("Не удалось выбрать профиль", e.message ?: "Проверьте конфигурацию и попробуйте снова.")
                 }
@@ -348,7 +413,62 @@ class MainActivity : Activity() {
             .show()
     }
 
-    private fun sectionHeading(label: String): TextView = TextView(this).apply {
+    private fun startSelectedVpnTunnel() {
+        if (openVpnProfileText != null) startEmbeddedOpenVpnTunnel() else startWireGuardTunnel()
+    }
+
+    private fun startEmbeddedOpenVpnTunnel() {
+        val profile = openVpnProfileText
+        if (profile.isNullOrBlank()) {
+            showError("Нет профиля OpenVPN", "Выберите или импортируйте профиль OpenVPN.")
+            return
+        }
+        val needsCredentials = profile.lineSequence().any { it.trim().startsWith("auth-user-pass", true) } &&
+            !profile.contains("<auth-user-pass>", true)
+        if (needsCredentials && !activeProfileProvider.equals("VPN Gate", true)) {
+            val username = EditText(this).apply { hint = "Имя пользователя" }
+            val password = EditText(this).apply {
+                hint = "Пароль"
+                inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+            }
+            val fields = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(24, 8, 24, 8)
+                addView(username)
+                addView(password)
+            }
+            AlertDialog.Builder(this)
+                .setTitle("Учётные данные OpenVPN")
+                .setMessage("Этот профиль требует имя пользователя и пароль. Данные используются только для текущего подключения.")
+                .setView(fields)
+                .setNegativeButton("Отмена", null)
+                .setPositiveButton("Подключить") { _, _ ->
+                    launchEmbeddedOpenVpn(profile, username.text.toString(), password.text.toString())
+                }
+                .show()
+            return
+        }
+        val user = if (activeProfileProvider.equals("VPN Gate", true)) "vpn" else ""
+        val pass = if (activeProfileProvider.equals("VPN Gate", true)) "vpn" else ""
+        launchEmbeddedOpenVpn(profile, user, pass)
+    }
+
+    private fun launchEmbeddedOpenVpn(profile: String, username: String, password: String) {
+        try {
+            pendingOpenVpnStart = false
+            status.text = "Запуск встроенного OpenVPN 3…\nСервер: $activeProfileName"
+            connectButton.isEnabled = false
+            MatrixVpnService.start(this, profile, username, password)
+            openVpnRunning = true
+            openVpnState = MatrixVpnService.STATE_CONNECTING
+            refreshModeButtons()
+        } catch (error: Exception) {
+            connectButton.isEnabled = true
+            showError("Не удалось запустить OpenVPN 3", error.message ?: "Android не смог запустить VPN-службу.")
+        }
+    }
+
+        private fun sectionHeading(label: String): TextView = TextView(this).apply {
         text = label
         textSize = 12f
         setTextColor(Color.rgb(0, 255, 70))
