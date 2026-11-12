@@ -702,7 +702,7 @@ class MainActivity : Activity() {
                         val labels = servers.map { server ->
                             val pingLabel = if (server.ping >= 0) server.ping.toString() + " мс" else "ping неизвестен"
                             val speedLabel = if (server.speed > 0) " • " + (server.speed / 1_000_000) + " Мбит/с" else ""
-                            server.country + " • " + server.host + "\n" + pingLabel +
+                            server.country + " • " + server.host + "\nIP: " + server.ip + " • " + pingLabel +
                                 " • сессий: " + server.sessions + speedLabel
                         }.toTypedArray()
                         AlertDialog.Builder(this)
