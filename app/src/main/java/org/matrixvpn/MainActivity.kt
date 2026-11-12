@@ -74,18 +74,22 @@ class MainActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val title = TextView(this).apply {
-            text = "MATRIX VPN"
-            textSize = 30f
-            setTextColor(Color.rgb(0, 255, 70))
+            text = "MATRIX"
+            textSize = 36f
+            letterSpacing = 0.16f
+            typeface = android.graphics.Typeface.create("sans-serif-light", android.graphics.Typeface.NORMAL)
+            setTextColor(Color.rgb(111, 255, 180))
             gravity = Gravity.CENTER
-            setPadding(8, 18, 8, 8)
+            setShadowLayer(18f, 0f, 0f, Color.rgb(0, 220, 150))
+            setPadding(8, 24, 8, 4)
         }
         val menuSubtitle = TextView(this).apply {
-            text = "HYBRID VPN CONTROL • ВЕРСИЯ 0.6.1"
-            textSize = 12f
-            setTextColor(Color.rgb(130, 220, 150))
+            text = "PRIVATE NETWORK  /  0.6.1"
+            textSize = 11f
+            letterSpacing = 0.18f
+            setTextColor(Color.rgb(166, 210, 190))
             gravity = Gravity.CENTER
-            setPadding(8, 0, 8, 18)
+            setPadding(8, 0, 8, 22)
         }
         val connectionHeading = sectionHeading("СОСТОЯНИЕ СОЕДИНЕНИЯ")
         val helpHeading = sectionHeading("СПРАВКА")
@@ -151,24 +155,24 @@ class MainActivity : Activity() {
         }
         val modePanel = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(14, 8, 14, 14)
-            background = roundedPanel(Color.argb(105, 20, 27, 23), Color.argb(145, 205, 170, 91), 30f)
+            setPadding(18, 12, 18, 18)
+            background = glassSurface(Color.argb(42, 160, 255, 220), Color.argb(112, 205, 184, 132), 30f)
             addView(modeHeading)
             addView(warpModeButton, menuButtonParams())
             addView(connectButton, menuButtonParams())
         }
         val statusPanel = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(14, 8, 14, 12)
-            background = roundedPanel(Color.argb(92, 16, 30, 23), Color.argb(105, 104, 137, 91), 24f)
+            setPadding(18, 12, 18, 16)
+            background = glassSurface(Color.argb(34, 125, 225, 190), Color.argb(88, 150, 190, 165), 26f)
             addView(connectionHeading)
             addView(status, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
             addView(networkStatus, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         }
         val toolsPanel = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(12, 12, 12, 12)
-            background = roundedPanel(Color.argb(82, 17, 29, 22), Color.argb(100, 104, 137, 91), 24f)
+            setPadding(14, 14, 14, 14)
+            background = glassSurface(Color.argb(30, 130, 205, 175), Color.argb(78, 135, 175, 145), 26f)
             addView(pasteButton, menuButtonParams())
             addView(importButton, menuButtonParams())
             addView(findVpnButton, menuButtonParams())
@@ -179,8 +183,8 @@ class MainActivity : Activity() {
         val menuContent = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_HORIZONTAL
-            setPadding(16, 12, 16, 30)
-            setBackgroundColor(Color.rgb(3, 9, 7))
+            setPadding(16, 16, 16, 34)
+            background = GradientDrawable(GradientDrawable.Orientation.TL_BR, intArrayOf(Color.rgb(3, 15, 13), Color.rgb(5, 10, 15), Color.rgb(3, 17, 12)))
             addView(title)
             addView(menuSubtitle)
             addView(modePanel, menuButtonParams())
@@ -191,21 +195,29 @@ class MainActivity : Activity() {
         }
         val mainScreen = ScrollView(this).apply {
             isFillViewport = true
-            setBackgroundColor(Color.rgb(4, 12, 7))
+            background = GradientDrawable(GradientDrawable.Orientation.TL_BR, intArrayOf(Color.rgb(3, 15, 13), Color.rgb(5, 9, 14), Color.rgb(3, 18, 13)))
             addView(menuContent, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         }
-        listOf(importButton, findWireGuardButton, findVpnButton, pasteButton, profilesButton, recoveryButton).forEach { button ->
-            button.background = roundedPanel(Color.argb(218, 15, 34, 25), Color.argb(175, 72, 92, 53), 16f)
+        listOf(importButton, findWireGuardButton, findVpnButton, pasteButton, profilesButton, recoveryButton).forEachIndexed { index, button ->
+            button.background = glassSurface(
+                if (index % 2 == 0) Color.argb(58, 125, 210, 180) else Color.argb(48, 160, 190, 220),
+                Color.argb(92, 170, 205, 175), 20f
+            )
             button.backgroundTintList = null
-            button.setTextColor(Color.rgb(245, 239, 215))
+            button.setTextColor(Color.rgb(222, 239, 228))
             button.textSize = 14f
-            button.minHeight = (50 * resources.displayMetrics.density).toInt()
+            button.minHeight = (58 * resources.displayMetrics.density).toInt()
             button.isAllCaps = false
-            button.elevation = 0f
+            button.typeface = android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL)
+            button.elevation = 5f * resources.displayMetrics.density
+            button.stateListAnimator = null
+            button.setShadowLayer(3f, 0f, 1f, Color.argb(95, 95, 235, 175))
         }
         styleGlassModeButton(warpModeButton, false)
         styleGlassModeButton(connectButton, false)
-        help.setTextColor(Color.rgb(170, 220, 180))
+        help.setTextColor(Color.rgb(165, 198, 184))
+        help.textSize = 12f
+        title.setShadowLayer(22f, 0f, 0f, Color.rgb(40, 255, 170))
         setContentView(MatrixRainView(this))
         window.decorView.postDelayed({
             setContentView(mainScreen)
@@ -233,16 +245,31 @@ class MainActivity : Activity() {
             setStroke((1.2f * resources.displayMetrics.density).toInt().coerceAtLeast(1), stroke)
         }
 
+    private fun glassSurface(tint: Int, stroke: Int, radiusDp: Float): GradientDrawable =
+        GradientDrawable(
+            GradientDrawable.Orientation.TL_BR,
+            intArrayOf(
+                Color.argb(112, 210, 255, 238),
+                tint,
+                Color.argb(72, 25, 55, 48)
+            )
+        ).apply {
+            cornerRadius = radiusDp * resources.displayMetrics.density
+            setStroke((1.2f * resources.displayMetrics.density).toInt().coerceAtLeast(1), stroke)
+        }
+
     private fun styleGlassModeButton(button: Button, active: Boolean) {
-        val gold = if (active) Color.argb(245, 255, 218, 125) else Color.argb(205, 164, 139, 83)
-        val fill = if (active) Color.argb(150, 72, 57, 25) else Color.argb(112, 29, 34, 28)
-        button.background = roundedPanel(fill, gold, 32f)
+        val gold = if (active) Color.argb(250, 255, 225, 145) else Color.argb(190, 191, 174, 132)
+        val tint = if (active) Color.argb(112, 205, 164, 76) else Color.argb(66, 140, 190, 168)
+        button.background = glassSurface(tint, gold, 30f)
         button.backgroundTintList = null
-        button.setTextColor(if (active) Color.rgb(255, 239, 190) else Color.rgb(232, 220, 190))
+        button.setTextColor(if (active) Color.rgb(255, 242, 205) else Color.rgb(232, 239, 222))
         button.textSize = 19f
-        button.elevation = if (active) 16f * resources.displayMetrics.density else 6f * resources.displayMetrics.density
+        button.typeface = android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL)
+        button.minHeight = (88 * resources.displayMetrics.density).toInt()
+        button.elevation = if (active) 18f * resources.displayMetrics.density else 8f * resources.displayMetrics.density
         button.stateListAnimator = null
-        button.setShadowLayer(if (active) 12f else 3f, 0f, 0f, if (active) Color.rgb(255, 196, 76) else Color.rgb(110, 91, 48))
+        button.setShadowLayer(if (active) 16f else 5f, 0f, 0f, if (active) Color.rgb(255, 204, 105) else Color.rgb(108, 180, 151))
     }
 
     private fun refreshModeButtons() {
