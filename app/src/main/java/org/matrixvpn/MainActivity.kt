@@ -306,10 +306,19 @@ class MainActivity : Activity() {
         }
         val profiles = SecureProfileVault.list(this).filter { !it.provider.equals("WARP", true) }
         if (profiles.isEmpty()) {
-            showError("Нет VPN-профиля", "Импортируйте WireGuard/AmneziaWG-файл или вставьте конфигурацию. После этого отдельная кнопка VPN сможет подключиться.")
+            // The primary VPN control must actually discover servers when the user's VPN pool is empty.
+            // VPN Gate currently publishes OpenVPN profiles; MATRIX hands those to a compatible
+            // external OpenVPN app instead of pretending its WireGuard/AWG engine can run them.
+            searchVpnServices()
             return
         }
-        showSavedModeProfiles(profiles, "VPN")
+        AlertDialog.Builder(this)
+            .setTitle("РЕЖИМ VPN")
+            .setItems(arrayOf("Мои профили WireGuard / AmneziaWG (${profiles.size})", "Найти бесплатные VPN-серверы")) { _, which ->
+                if (which == 0) showSavedModeProfiles(profiles, "VPN") else searchVpnServices()
+            }
+            .setNegativeButton("Отмена", null)
+            .show()
     }
 
     private fun showSavedModeProfiles(profiles: List<org.matrixvpn.profile.SavedVpnProfile>, mode: String) {
@@ -558,54 +567,92 @@ class MainActivity : Activity() {
     }
 
     private fun fetchVpnGateCatalog(): Pair<List<VpnGateServer>, String> {
-        val officialFailure: Exception
+        // Prefer the independently mirrored, hash-verified snapshot. Fall back to the official
+        // CSV API if GitHub/CDN endpoints are unavailable on the user's mobile network.
+        val mirrorFailure: Exception
         try {
-            val csv = String(readHttpsBytes("https://www.vpngate.net/api/iphone/", 20 * 1024 * 1024), Charsets.UTF_8)
-            val lines = csv.lineSequence().filter { it.isNotBlank() && !it.startsWith("*") }.toList()
-            val header = lines.indexOfFirst {
-                it.trimStart('#').startsWith("HostName,IP,Score,Ping,Speed,CountryLong", ignoreCase = true)
-            }
-            require(header >= 0) { "Официальный CSV VPN Gate имеет неизвестный формат." }
-            val servers = lines.drop(header + 1).mapNotNull { line ->
-                val fields = parseCsvLine(line)
-                if (fields.size < 15) return@mapNotNull null
-                val host = fields[0].trim()
-                val ip = fields[1].trim()
-                val score = fields[2].toLongOrNull() ?: 0L
-                val ping = fields[3].toLongOrNull() ?: -1L
-                val speed = fields[4].toLongOrNull() ?: 0L
-                val country = fields[5].trim().ifBlank { fields[6].trim().ifBlank { "Неизвестная страна" } }
-                val sessions = fields[7].toIntOrNull() ?: 0
-                val config = fields[14].trim()
-                if (host.isBlank() || !isValidIpv4(ip) || config.isBlank()) null
-                else VpnGateServer(host, ip, country, ping, speed, sessions, score, config)
-            }.sortedWith(compareByDescending<VpnGateServer> { it.score }
-                .thenBy { if (it.ping < 0) Long.MAX_VALUE else it.ping }).take(30)
-            require(servers.isNotEmpty()) { "Официальный каталог не содержит пригодных конфигураций." }
-            return Pair(servers, "официальный VPN Gate API")
+            val mirror = fetchVpnGateMirror()
+            return Pair(mirror.first, "проверенное зеркало VPN Gate • " + mirror.second)
         } catch (error: Exception) {
-            officialFailure = error
+            mirrorFailure = error
         }
 
         try {
-            val mirror = fetchVpnGateMirror()
-            return Pair(mirror.first, "зеркало VPN Gate • снимок " + mirror.second)
-        } catch (error: Exception) {
+            val csvBytes = readHttpsBytes("https://www.vpngate.net/api/iphone/", 8 * 1024 * 1024)
+            val csv = String(csvBytes, Charsets.UTF_8).removePrefix("\uFEFF")
+            val lines = csv.lineSequence().map { it.trimEnd('\r') }
+                .filter { it.isNotBlank() && it.trim() != "*" && !it.startsWith("*") }.toList()
+            val header = lines.indexOfFirst { it.trimStart('#').startsWith("HostName,", ignoreCase = true) }
+            require(header >= 0) { "Официальный CSV VPN Gate не содержит строки заголовков." }
+            val columns = parseCsvLine(lines[header].trimStart('#')).map { it.trim() }
+            val hostIndex = columns.indexOf("HostName")
+            val ipIndex = columns.indexOf("IP")
+            val scoreIndex = columns.indexOf("Score")
+            val pingIndex = columns.indexOf("Ping")
+            val speedIndex = columns.indexOf("Speed")
+            val countryIndex = columns.indexOf("CountryLong")
+            val countryShortIndex = columns.indexOf("CountryShort")
+            val sessionsIndex = columns.indexOf("NumVpnSessions")
+            val configIndex = columns.indexOf("OpenVPN_ConfigData_Base64")
+            require(listOf(hostIndex, ipIndex, scoreIndex, pingIndex, speedIndex, countryIndex,
+                countryShortIndex, sessionsIndex, configIndex).all { it >= 0 }) {
+                "Формат CSV VPN Gate изменился: обязательные поля не найдены."
+            }
+            val servers = lines.drop(header + 1).mapNotNull { line ->
+                if (line.startsWith("#")) return@mapNotNull null
+                val fields = parseCsvLine(line)
+                if (fields.size != columns.size) return@mapNotNull null
+                val host = fields[hostIndex].trim()
+                val ip = fields[ipIndex].trim()
+                val score = fields[scoreIndex].toLongOrNull() ?: 0L
+                val ping = fields[pingIndex].toLongOrNull() ?: -1L
+                val speed = fields[speedIndex].toLongOrNull() ?: 0L
+                val country = fields[countryIndex].trim().ifBlank {
+                    fields[countryShortIndex].trim().ifBlank { "Неизвестная страна" }
+                }
+                val sessions = fields[sessionsIndex].toIntOrNull() ?: 0
+                val config = fields[configIndex].trim()
+                if (host.isBlank() || !isValidIpv4(ip) || config.isBlank()) null
+                else VpnGateServer(host, ip, country, ping, speed, sessions, score, config)
+            }.distinctBy { it.host + "|" + it.ip }
+                .sortedWith(compareByDescending<VpnGateServer> { it.score }
+                    .thenBy { if (it.ping < 0) Long.MAX_VALUE else it.ping }).take(30)
+            require(servers.isNotEmpty()) { "Официальный каталог не содержит пригодных OpenVPN-конфигураций." }
+            return Pair(servers, "официальный VPN Gate API")
+        } catch (officialFailure: Exception) {
             throw IllegalStateException(
-                "Официальный API: " + (officialFailure.message ?: "ошибка") +
-                    "\nПроверенное зеркало: " + (error.message ?: "ошибка")
+                "Зеркало VPN Gate: " + (mirrorFailure.message ?: "ошибка") +
+                    "\nОфициальный API: " + (officialFailure.message ?: "ошибка")
             )
         }
     }
 
     private fun fetchVpnGateMirror(): Pair<List<VpnGateServer>, String> {
-        val indexBytes = readHttpsBytes(
+        val indexUrls = listOf(
             "https://raw.githubusercontent.com/GeorgeXie2333/vpngate-list-mirror/main/latest.json",
-            128 * 1024
+            "https://cdn.jsdelivr.net/gh/GeorgeXie2333/vpngate-list-mirror@main/latest.json",
+            "https://fastly.jsdelivr.net/gh/GeorgeXie2333/vpngate-list-mirror@main/latest.json"
         )
-        val index = org.json.JSONObject(String(indexBytes, Charsets.UTF_8))
+        var index: org.json.JSONObject? = null
+        val indexErrors = mutableListOf<String>()
+        for (url in indexUrls) {
+            try {
+                val bytes = readHttpsBytes(url, 128 * 1024)
+                val candidate = org.json.JSONObject(String(bytes, Charsets.UTF_8))
+                require(candidate.optInt("schema_version", -1) == 1) {
+                    "Неизвестная версия каталога VPN Gate."
+                }
+                index = candidate
+                break
+            } catch (error: Exception) {
+                indexErrors.add(error.message ?: "ошибка загрузки индекса")
+            }
+        }
+        val snapshotIndex = index ?: throw IllegalStateException(
+            indexErrors.joinToString("; ").ifBlank { "Не удалось загрузить индекс VPN Gate." }
+        )
         require(index.optInt("schema_version", -1) == 1) { "Версия схемы зеркала VPN Gate не поддерживается." }
-        val commit = index.optString("data_commit")
+        val commit = snapshotIndex.optString("data_commit")
         require(commit.matches(Regex("[0-9a-fA-F]{40}"))) { "Неверный идентификатор снимка VPN Gate." }
         val metadata = index.getJSONObject("files").getJSONObject("data/servers.json")
         val expectedBytes = metadata.optInt("bytes", -1)
@@ -615,6 +662,8 @@ class MainActivity : Activity() {
 
         val urls = listOf(
             "https://cdn.jsdelivr.net/gh/GeorgeXie2333/vpngate-list-mirror@" + commit + "/data/servers.json",
+            "https://fastly.jsdelivr.net/gh/GeorgeXie2333/vpngate-list-mirror@" + commit + "/data/servers.json",
+            "https://gcore.jsdelivr.net/gh/GeorgeXie2333/vpngate-list-mirror@" + commit + "/data/servers.json",
             "https://raw.githubusercontent.com/GeorgeXie2333/vpngate-list-mirror/" + commit + "/data/servers.json"
         )
         var verified: ByteArray? = null
@@ -672,7 +721,7 @@ class MainActivity : Activity() {
         return Pair(
             servers.sortedWith(compareByDescending<VpnGateServer> { it.score }
                 .thenBy { if (it.ping < 0) Long.MAX_VALUE else it.ping }).take(30),
-            index.optString("fetched_at").replace("T", " ").take(16)
+            snapshotIndex.optString("fetched_at").replace("T", " ").take(16)
         )
     }
 
@@ -682,8 +731,9 @@ class MainActivity : Activity() {
             connectTimeout = 15000
             readTimeout = 25000
             instanceFollowRedirects = true
-            setRequestProperty("User-Agent", "MATRIX-VPN-Android/0.6.0")
+            setRequestProperty("User-Agent", "MATRIX-VPN-Android/0.6.2")
             setRequestProperty("Accept", "application/json,text/csv,text/plain,*/*")
+            setRequestProperty("Accept-Encoding", "identity")
         }
         try {
             val code = connection.responseCode
