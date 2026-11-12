@@ -207,7 +207,7 @@ class MainActivity : Activity() {
     /** Fetches a fresh free Cloudflare WARP-compatible WireGuard profile from the public generator API. */
     private fun fetchFreeWarpProfile() {
         val previousVaultProfile = SecureProfileVault.activeId(this)
-        status.text = "Получаю пул WARP-профилей AWG 2.0…"
+        status.text = "Получаю мобильный пул WARP AWG 2.0 • CPS5…"
         connectButton.isEnabled = false
         Thread {
             val savedProfiles = mutableListOf<org.matrixvpn.profile.SavedVpnProfile>()
@@ -218,7 +218,7 @@ class MainActivity : Activity() {
                     var connection: java.net.HttpURLConnection? = null
                     try {
                         val url = java.net.URL(
-                            "https://awgconfig.com/api/warp?mode=awg2&count=3&dns=cloudflare&endpointMode=$endpointMode"
+                            "https://awgconfig.com/api/warp?mode=awg2&count=3&dns=cloudflare&mobile=1&cps5=1&cps=auto&cpsCompat=all&endpointMode=$endpointMode"
                         )
                         connection = (url.openConnection() as java.net.HttpURLConnection).apply {
                             requestMethod = "GET"
@@ -271,7 +271,7 @@ class MainActivity : Activity() {
                                 Config.parse(ByteArrayInputStream(text.toByteArray(Charsets.UTF_8)))
                                 val number = savedProfiles.size + 1
                                 val endpoint = inspected.endpointHints.firstOrNull()?.take(42)
-                                val name = if (endpoint.isNullOrBlank()) "WARP AWG2 • $number"
+                                val name = if (endpoint.isNullOrBlank()) "WARP AWG2 Mobile CPS5 • $number"
                                     else "WARP AWG2 • $number • $endpoint"
                                 savedProfiles.add(SecureProfileVault.save(this, name, "WARP", text))
                             } catch (e: Exception) {
@@ -312,7 +312,7 @@ class MainActivity : Activity() {
             val text = SecureProfileVault.load(this, profile.id)
             val endpoint = if (text == null) "адрес не определён"
                 else VpnProfileInspector.inspect(text).endpointHints.firstOrNull() ?: "адрес не определён"
-            "${profile.name}\n$endpoint\nAWG 2.0 • ещё не проверен на этом устройстве"
+            "${profile.name}\n$endpoint\nAWG 2.0 Mobile + CPS5 • ещё не проверен на этом устройстве"
         }.toTypedArray()
         AlertDialog.Builder(this)
             .setTitle("ПУЛ WARP • AWG 2.0")
