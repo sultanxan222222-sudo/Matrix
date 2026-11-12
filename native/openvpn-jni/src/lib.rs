@@ -2,7 +2,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use jni::{
     objects::{GlobalRef, JObject, JString, JValue},
-    sys::{jboolean, jint, jlong},
+    sys::jboolean,
     JNIEnv, JavaVM,
 };
 use openvpn_connect::{Client, Config, Credentials, Event, EventHandler, TunBuilder, DnsOptions};
@@ -45,18 +45,6 @@ impl AndroidBridge {
                 method,
                 "(Ljava/lang/String;)Z",
                 &[JValue::Object(value.as_ref())],
-            )?.z()
-        }).unwrap_or(false)
-    }
-
-    fn bool_string_int(&self, method: &str, value: &str, number: i32) -> bool {
-        self.with_env(|env| {
-            let value = env.new_string(value)?;
-            env.call_method(
-                self.service.as_obj(),
-                method,
-                "(Ljava/lang/String;I)Z",
-                &[JValue::Object(value.as_ref()), JValue::Int(number)],
             )?.z()
         }).unwrap_or(false)
     }
