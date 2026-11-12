@@ -9,6 +9,8 @@ import android.graphics.Color
 import android.net.VpnService
 import android.net.Uri
 import android.os.Bundle
+import android.os.SystemClock
+import android.provider.Settings
 import android.text.InputType
 import android.view.Gravity
 import android.view.ViewGroup
@@ -26,6 +28,8 @@ import org.matrixvpn.network.NetworkWatcher
 import org.matrixvpn.network.TunnelConnectivityProbe
 import org.matrixvpn.profile.ImportedVpnProfile
 import org.matrixvpn.profile.VpnProfileInspector
+import org.matrixvpn.profile.SecureProfileVault
+import org.matrixvpn.recovery.NodeHealthStore
 import java.io.ByteArrayInputStream
 
 class MainActivity : Activity() {
@@ -44,6 +48,9 @@ class MainActivity : Activity() {
     private val wireGuardBackend by lazy { GoBackend(applicationContext, tunnelActions) }
     private var wireGuardConfig: Config? = null
     private var tunnelUp = false
+    private var activeProfileId: String? = null
+    private var activeProfileName: String = "Нет профиля"
+    private var activeProfileProvider: String = "Импорт"
 
     private val matrixTunnel = object : Tunnel {
         override fun getName(): String = "matrix"
@@ -72,7 +79,7 @@ class MainActivity : Activity() {
             setPadding(8, 18, 8, 8)
         }
         val menuSubtitle = TextView(this).apply {
-            text = "УПРАВЛЕНИЕ VPN • ВЕРСИЯ 0.5.1"
+            text = "HYBRID VPN CONTROL • ВЕРСИЯ 0.6.0"
             textSize = 12f
             setTextColor(Color.rgb(130, 220, 150))
             gravity = Gravity.CENTER
@@ -99,8 +106,16 @@ class MainActivity : Activity() {
             setOnClickListener { chooseVpnProfile() }
         }
         val findWireGuardButton = Button(this).apply {
-            text = "Автонастройка и подключение"
+            text = "WARP — отдельный режим"
             setOnClickListener { fetchFreeWarpProfile() }
+        }
+        val profilesButton = Button(this).apply {
+            text = "Мои профили • умный выбор"
+            setOnClickListener { showProfilePoolDialog() }
+        }
+        val recoveryButton = Button(this).apply {
+            text = "Безопасное авто-переключение"
+            setOnClickListener { showRecoveryStatus() }
         }
         val findVpnButton = Button(this).apply {
             text = "Каталог VPN Gate (OpenVPN)"
@@ -116,7 +131,7 @@ class MainActivity : Activity() {
             setOnClickListener { connectOrDisconnect() }
         }
         val help = TextView(this).apply {
-            text = "Импортируйте конфигурацию из буфера или файл с телефона. WARP работает отдельно. Пункт бесплатных серверов получает актуальный каталог VPN Gate и передаёт OpenVPN-профиль совместимому приложению; встроенное подключение MATRIX пока поддерживает WireGuard/AmneziaWG. Бесплатные серверы добровольцев не гарантируют доступность и конфиденциальность."
+            text = "WARP — отдельный режим получения WARP-совместимого WireGuard/AWG-профиля через сторонний генератор (это не официальный API Cloudflare). MATRIX хранит несколько профилей в зашифрованном Android Keystore, оценивает их по HTTPS-проверкам и может переключаться на резервный профиль только при включённом системном Always-on VPN и блокировке соединений без VPN. VPN Gate даёт OpenVPN-профили для внешнего OpenVPN-клиента; встроенный движок MATRIX подключает WireGuard/AmneziaWG."
             textSize = 13f
             gravity = Gravity.CENTER
             setPadding(8, 12, 8, 12)
@@ -135,6 +150,8 @@ class MainActivity : Activity() {
             addView(importButton, menuButtonParams())
             addView(findVpnButton, menuButtonParams())
             addView(findWireGuardButton, menuButtonParams())
+            addView(profilesButton, menuButtonParams())
+            addView(recoveryButton, menuButtonParams())
             addView(connectButton, menuButtonParams())
             addView(helpHeading)
             addView(help, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
@@ -144,7 +161,7 @@ class MainActivity : Activity() {
             setBackgroundColor(Color.rgb(4, 12, 7))
             addView(menuContent, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         }
-        listOf(importButton, findWireGuardButton, findVpnButton, pasteButton, connectButton).forEach { button ->
+        listOf(importButton, findWireGuardButton, findVpnButton, pasteButton, profilesButton, recoveryButton, connectButton).forEach { button ->
             button.backgroundTintList = ColorStateList.valueOf(Color.rgb(0, 110, 40))
             button.setTextColor(Color.WHITE)
             button.textSize = 14f
@@ -229,9 +246,9 @@ class MainActivity : Activity() {
                     "Сервис вернул данные в неизвестном формате."
                 }
                 runOnUiThread {
-                    processProfileText(profileText)
+                    processProfileText(profileText, "Cloudflare WARP", "WARP")
                     if (wireGuardConfig != null) {
-                        status.text = "Профиль WARP получен. Запрашиваю разрешение Android…"
+                        status.text = "Отдельный профиль WARP сохранён. Запрашиваю разрешение Android…"
                         val prepareIntent = VpnService.prepare(this)
                         if (prepareIntent != null) startActivityForResult(prepareIntent, vpnPermissionRequest)
                         else startWireGuardTunnel()
@@ -413,6 +430,98 @@ class MainActivity : Activity() {
         }
     }
 
+    private fun showProfilePoolDialog() {
+        val profiles = SecureProfileVault.list(this)
+            .sortedWith(compareByDescending<org.matrixvpn.profile.SavedVpnProfile> { NodeHealthStore.score(this, it.id) }
+                .thenByDescending { it.createdAt })
+        if (profiles.isEmpty()) {
+            AlertDialog.Builder(this)
+                .setTitle("Пул MATRIX пока пуст")
+                .setMessage("Добавьте WARP-профиль, импортируйте WireGuard/AmneziaWG или вставьте конфигурацию. Профили хранятся отдельно и в зашифрованном виде.")
+                .setPositiveButton("Импортировать") { _, _ -> chooseVpnProfile() }
+                .setNegativeButton("Закрыть", null).show()
+            return
+        }
+        val labels = profiles.map { profile ->
+            val marker = if (profile.provider.equals("WARP", true)) "WARP" else profile.format
+            "${profile.name}\n$marker • оценка ${NodeHealthStore.score(this, profile.id)}/100 • ${NodeHealthStore.describe(this, profile.id)}"
+        }.toTypedArray()
+        AlertDialog.Builder(this)
+            .setTitle("ПУЛ ПРОФИЛЕЙ MATRIX")
+            .setItems(labels) { _, which ->
+                val chosen = profiles[which]
+                try {
+                    val text = SecureProfileVault.load(this, chosen.id)
+                        ?: throw IllegalStateException("Не удалось расшифровать профиль. Импортируйте его заново.")
+                    val inspected = VpnProfileInspector.inspect(text)
+                    require(inspected.format == ImportedVpnProfile.Format.WIREGUARD ||
+                        inspected.format == ImportedVpnProfile.Format.AMNEZIAWG) {
+                        "Формат профиля не поддерживается встроенным движком."
+                    }
+                    wireGuardConfig = Config.parse(ByteArrayInputStream(text.toByteArray(Charsets.UTF_8)))
+                    activeProfileId = chosen.id
+                    activeProfileName = chosen.name
+                    activeProfileProvider = chosen.provider
+                    SecureProfileVault.setActive(this, chosen.id)
+                    connectButton.isEnabled = true
+                    status.text = "Выбран профиль: ${chosen.name}\nТип: ${chosen.format}\nVPN-туннель: ${if (tunnelUp) "подключён" else "отключён"}"
+                } catch (e: Exception) {
+                    showError("Не удалось выбрать профиль", e.message ?: "Проверьте файл конфигурации.")
+                }
+            }
+            .setPositiveButton("Добавить") { _, _ -> chooseVpnProfile() }
+            .setNeutralButton("Удалить") { _, _ -> showDeleteProfileDialog(profiles) }
+            .setNegativeButton("Закрыть", null)
+            .show()
+    }
+
+    private fun showDeleteProfileDialog(profiles: List<org.matrixvpn.profile.SavedVpnProfile>) {
+        val labels = profiles.map { "${it.name} • ${it.provider}" }.toTypedArray()
+        AlertDialog.Builder(this).setTitle("Удалить сохранённый профиль")
+            .setItems(labels) { _, which ->
+                val item = profiles[which]
+                AlertDialog.Builder(this).setTitle("Удалить ${item.name}?")
+                    .setMessage("Будут удалены зашифрованная конфигурация и история проверок.")
+                    .setNegativeButton("Отмена", null)
+                    .setPositiveButton("Удалить") { _, _ ->
+                        SecureProfileVault.delete(this, item.id)
+                        if (activeProfileId == item.id) {
+                            activeProfileId = null
+                            SecureProfileVault.setActive(this, null)
+                            wireGuardConfig = null
+                            connectButton.isEnabled = false
+                            connectButton.text = "Подключить VPN"
+                            status.text = "Активный профиль удалён. Импортируйте или выберите другой профиль."
+                        }
+                    }.show()
+            }.setNegativeButton("Отмена", null).show()
+    }
+
+    private fun isMatrixLockdownEnabled(): Boolean {
+        return try {
+            val alwaysOnPackage = Settings.Secure.getString(contentResolver, "always_on_vpn_app")
+            val lockdown = Settings.Secure.getInt(contentResolver, "always_on_vpn_lockdown", 0) == 1
+            alwaysOnPackage == packageName && lockdown
+        } catch (_: Exception) { false }
+    }
+
+    private fun showRecoveryStatus() {
+        val enabled = isMatrixLockdownEnabled()
+        val message = if (enabled) {
+            "Системная блокировка Android включена для MATRIX. При неудачной HTTPS-проверке во время подключения MATRIX может проверить сохранённые резервные профили. Это проверка интернет-доступа через туннель, а не криптографического рукопожатия."
+        } else {
+            "Для автоматического переключения без утечки трафика откройте настройки Android → VPN → MATRIX, включите «Постоянная VPN» (Always-on VPN) и «Блокировать подключения без VPN» (Block connections without VPN). MATRIX не будет автоматически отключать один туннель и запускать другой, пока системная блокировка не подтверждена."
+        }
+        AlertDialog.Builder(this)
+            .setTitle(if (enabled) "Защита переключения активна" else "Нужно включить системную защиту")
+            .setMessage(message)
+            .setPositiveButton("Открыть настройки VPN") { _, _ ->
+                try { startActivity(Intent(Settings.ACTION_VPN_SETTINGS)) }
+                catch (e: Exception) { showError("Настройки недоступны", e.message ?: "Откройте настройки Android → VPN вручную.") }
+            }
+            .setNegativeButton("Закрыть", null).show()
+    }
+
     private fun importFromClipboard() {
         try {
             val clipboard = getSystemService(CLIPBOARD_SERVICE) as ClipboardManager
@@ -506,26 +615,73 @@ class MainActivity : Activity() {
 
     private fun startWireGuardTunnel() {
         val config = wireGuardConfig ?: return
-        status.text = "Запуск VPN-туннеля…"
+        val startingProfileId = activeProfileId
+        val startingProfileName = activeProfileName
+        val startingProvider = activeProfileProvider
+        status.text = "Запуск VPN-туннеля: $startingProfileName…"
         connectButton.isEnabled = false
         Thread {
+            var finalText = ""
+            var connected = false
             try {
                 wireGuardBackend.setState(matrixTunnel, State.UP, config)
-                val probe = TunnelConnectivityProbe.check()
-                runOnUiThread {
-                    status.text = if (probe.reachable) {
-                        "VPN-туннель запущен\n${probe.message}\nПодтверждение рукопожатия с сервером отдельно не проверено."
-                    } else {
-                        "VPN-туннель запущен, но проверка интернета не пройдена.\n${probe.message}\nСервер может быть недоступен или профиль может не направлять интернет-трафик через туннель."
+                var probeStartedAt = SystemClock.elapsedRealtime()
+                var probe = TunnelConnectivityProbe.check()
+                var latency = (SystemClock.elapsedRealtime() - probeStartedAt).coerceAtLeast(1L)
+                if (startingProfileId != null) NodeHealthStore.record(this, startingProfileId, probe.reachable, latency)
+
+                if (probe.reachable) {
+                    connected = true
+                    finalText = "Подключено: $startingProfileName\n${probe.message}\nОценка основана на HTTPS-доступе через туннель; peer-handshake отдельно не подтверждён."
+                } else if (startingProvider != "WARP" && isMatrixLockdownEnabled()) {
+                    val backups = SecureProfileVault.list(this)
+                        .filter { it.id != startingProfileId && it.format in setOf("WIREGUARD", "AMNEZIAWG") }
+                        .sortedByDescending { NodeHealthStore.score(this, it.id) }
+                    val attempts = mutableListOf<String>()
+                    for (backup in backups) {
+                        try {
+                            val text = SecureProfileVault.load(this, backup.id) ?: continue
+                            val backupConfig = Config.parse(ByteArrayInputStream(text.toByteArray(Charsets.UTF_8)))
+                            wireGuardBackend.setState(matrixTunnel, State.DOWN, null)
+                            wireGuardBackend.setState(matrixTunnel, State.UP, backupConfig)
+                            probeStartedAt = SystemClock.elapsedRealtime()
+                            probe = TunnelConnectivityProbe.check()
+                            latency = (SystemClock.elapsedRealtime() - probeStartedAt).coerceAtLeast(1L)
+                            NodeHealthStore.record(this, backup.id, probe.reachable, latency)
+                            attempts.add(backup.name)
+                            if (probe.reachable) {
+                                activeProfileId = backup.id
+                                activeProfileName = backup.name
+                                activeProfileProvider = backup.provider
+                                SecureProfileVault.setActive(this, backup.id)
+                                wireGuardConfig = backupConfig
+                                connected = true
+                                finalText = "Резервное переключение выполнено\nАктивный профиль: ${backup.name}\n${probe.message}\nРезультат подтверждён HTTPS-проверкой; peer-handshake отдельно не подтверждён."
+                                break
+                            }
+                            wireGuardBackend.setState(matrixTunnel, State.DOWN, null)
+                        } catch (_: Exception) {
+                            attempts.add("${backup.name} (ошибка запуска)")
+                            try { wireGuardBackend.setState(matrixTunnel, State.DOWN, null) } catch (_: Exception) { }
+                        }
                     }
-                    connectButton.isEnabled = true
-                    connectButton.text = if (tunnelUp) "Отключить VPN" else "Подключить VPN"
+                    if (!connected) {
+                        try { wireGuardBackend.setState(matrixTunnel, State.DOWN, null) } catch (_: Exception) { }
+                        finalText = "Основной профиль и резервные профили не прошли проверку.\nПроверено резервных профилей: ${attempts.size}.\nСистемная блокировка Android остаётся включённой."
+                    }
+                } else {
+                    connected = true
+                    finalText = "Туннель запущен, но HTTPS-проверка не пройдена.\n${probe.message}\nАвтопереключение не запускалось: включите Android Always-on VPN и «Блокировать подключения без VPN»."
                 }
             } catch (e: Exception) {
-                runOnUiThread {
-                    connectButton.isEnabled = true
-                    showError("Ошибка подключения", e.message ?: "Не удалось запустить WireGuard. Проверьте профиль и разрешение Android на VPN.")
-                }
+                finalText = "Ошибка запуска VPN: ${e.message ?: e.javaClass.simpleName}"
+                try { wireGuardBackend.setState(matrixTunnel, State.DOWN, null) } catch (_: Exception) { }
+            }
+            runOnUiThread {
+                status.text = finalText
+                connectButton.isEnabled = true
+                connectButton.text = if (connected && tunnelUp) "Отключить VPN" else "Подключить VPN"
+                if (!connected && finalText.startsWith("Ошибка")) showError("Не удалось подключить VPN", finalText)
             }
         }.start()
     }
@@ -535,18 +691,39 @@ class MainActivity : Activity() {
      * The tunnel is deliberately not started automatically: Android VPN consent remains explicit.
      */
     private fun restoreSavedProfile() {
-        val saved = SecureProfileStore.load(this) ?: return
+        val activeId = SecureProfileVault.activeId(this)
+        if (activeId != null) {
+            val metadata = SecureProfileVault.list(this).firstOrNull { it.id == activeId }
+            val stored = SecureProfileVault.load(this, activeId)
+            if (metadata != null && stored != null) {
+                try {
+                    wireGuardConfig = Config.parse(ByteArrayInputStream(stored.toByteArray(Charsets.UTF_8)))
+                    activeProfileId = metadata.id
+                    activeProfileName = metadata.name
+                    activeProfileProvider = metadata.provider
+                    connectButton.isEnabled = true
+                    status.text = "Пул MATRIX восстановлен\nАктивный профиль: ${metadata.name}\nVPN-туннель: отключён"
+                    return
+                } catch (_: Exception) {
+                    SecureProfileVault.delete(this, activeId)
+                }
+            }
+        }
+        val legacy = SecureProfileStore.load(this) ?: return
         try {
-            val inspected = VpnProfileInspector.inspect(saved)
-            require(
-                inspected.format == ImportedVpnProfile.Format.WIREGUARD ||
-                    inspected.format == ImportedVpnProfile.Format.AMNEZIAWG
-            ) { "Сохранённый профиль больше не поддерживается." }
-            wireGuardConfig = Config.parse(ByteArrayInputStream(saved.toByteArray(Charsets.UTF_8)))
+            val inspected = VpnProfileInspector.inspect(legacy)
+            require(inspected.format == ImportedVpnProfile.Format.WIREGUARD ||
+                inspected.format == ImportedVpnProfile.Format.AMNEZIAWG) {
+                "Сохранённый профиль больше не поддерживается."
+            }
+            wireGuardConfig = Config.parse(ByteArrayInputStream(legacy.toByteArray(Charsets.UTF_8)))
+            val saved = SecureProfileVault.save(this, "Мигрированный профиль", "Импорт", legacy)
+            activeProfileId = saved.id
+            activeProfileName = saved.name
+            activeProfileProvider = saved.provider
             connectButton.isEnabled = true
-            status.text = "Сохранённый профиль восстановлен\nVPN-туннель: отключён\nНажмите «Подключить VPN» для нового подключения."
+            status.text = "Старый профиль перенесён в пул MATRIX\nVPN-туннель: отключён"
         } catch (e: Exception) {
-            SecureProfileStore.clear(this)
             wireGuardConfig = null
             connectButton.isEnabled = false
             status.text = "Сохранённый профиль повреждён или больше не поддерживается."
@@ -577,7 +754,11 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun processProfileText(profileText: String) {
+    private fun processProfileText(
+        profileText: String,
+        suggestedName: String? = null,
+        providerLabel: String = "Импорт"
+    ) {
         try {
             require(profileText.isNotBlank()) { "Конфигурация пустая. Вставьте текст или выберите полный файл .conf." }
             require(profileText.length <= 2_000_000) { "Файл слишком большой для безопасного импорта." }
@@ -599,11 +780,19 @@ class MainActivity : Activity() {
             connectButton.isEnabled = wireGuardConfig != null
             if (wireGuardConfig != null) {
                 try {
+                    val defaultName = suggestedName
+                        ?: profile.endpointHints.firstOrNull()?.substringBeforeLast(':')?.takeIf { it.isNotBlank() }
+                        ?: "Профиль ${System.currentTimeMillis()}"
+                    val saved = SecureProfileVault.save(this, defaultName, providerLabel, profileText)
+                    activeProfileId = saved.id
+                    activeProfileName = saved.name
+                    activeProfileProvider = saved.provider
+                    SecureProfileVault.setActive(this, saved.id)
                     SecureProfileStore.save(this, profileText)
                 } catch (e: Exception) {
-                    showError("Профиль готов, но не сохранён", "Не удалось записать профиль в защищённое хранилище устройства. После закрытия приложения его может понадобиться импортировать снова. Подробности: ${e.message ?: "ошибка хранилища"}")
+                    showError("Не удалось сохранить профиль", e.message ?: "Профиль проверен, но не добавлен в зашифрованный пул.")
                 }
-            } else {
+            } else if (profile.format != ImportedVpnProfile.Format.OPENVPN) {
                 SecureProfileStore.clear(this)
             }
             val endpointText = if (profile.endpointHints.isEmpty()) "Адрес сервера не найден" else profile.endpointHints.joinToString("\n")
@@ -616,9 +805,9 @@ class MainActivity : Activity() {
                 else if (wireGuardConfig != null) append("Конфигурация WireGuard проверена. Теперь можно запросить разрешение Android и подключиться.")
                 else if (profile.format == ImportedVpnProfile.Format.OPENVPN) append("Профиль OpenVPN распознан, но модуль для подключения OpenVPN пока не встроен.")
                 else append("Подходящая конфигурация WireGuard/AmneziaWG не загружена.")
-                append("\n\nПоддерживаемый профиль WireGuard/AmneziaWG сохраняется в зашифрованном хранилище Android Keystore и восстанавливается при следующем запуске. Автоподключение без подтверждения пользователя не выполняется.")
+                append("\n\nПоддерживаемый профиль WireGuard/AmneziaWG добавлен в зашифрованный пул MATRIX (Android Keystore) и выбран активным. Откройте «Мои профили» для управления несколькими конфигурациями. Автоподключение при запуске приложения не выполняется.")
             }
-            status.text = if (wireGuardConfig != null) "Профиль $formatLabel готов\nVPN-туннель: отключён"
+            status.text = if (wireGuardConfig != null) "Профиль $formatLabel готов: $activeProfileName\nVPN-туннель: ${if (tunnelUp) "подключён" else "отключён"}"
             else "Профиль проверен: $formatLabel\nVPN-туннель: отключён"
             AlertDialog.Builder(this).setTitle("Профиль VPN обработан").setMessage(details).setPositiveButton("Понятно", null).show()
         } catch (e: Exception) {
