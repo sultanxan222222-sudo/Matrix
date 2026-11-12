@@ -184,6 +184,7 @@ class MatrixVpnService : VpnService() {
     /** Native OpenVPN callbacks are delivered from its dedicated worker thread. */
     fun nativeOnOpenVpnEvent(name: String, info: String, error: Boolean) {
         val state = when {
+            error -> STATE_ERROR
             name.equals("CONNECTED", true) || name.equals("RECONNECTED", true) -> STATE_CONNECTED
             name.equals("SESSION_FINISHED", true) -> if (error) STATE_ERROR else STATE_DISCONNECTED
             name.contains("AUTH_FAILED", true) || name.contains("FATAL", true) -> STATE_ERROR
