@@ -651,10 +651,10 @@ class MainActivity : Activity() {
         val snapshotIndex = index ?: throw IllegalStateException(
             indexErrors.joinToString("; ").ifBlank { "Не удалось загрузить индекс VPN Gate." }
         )
-        require(index.optInt("schema_version", -1) == 1) { "Версия схемы зеркала VPN Gate не поддерживается." }
+        require(snapshotIndex.optInt("schema_version", -1) == 1) { "Версия схемы зеркала VPN Gate не поддерживается." }
         val commit = snapshotIndex.optString("data_commit")
         require(commit.matches(Regex("[0-9a-fA-F]{40}"))) { "Неверный идентификатор снимка VPN Gate." }
-        val metadata = index.getJSONObject("files").getJSONObject("data/servers.json")
+        val metadata = snapshotIndex.getJSONObject("files").getJSONObject("data/servers.json")
         val expectedBytes = metadata.optInt("bytes", -1)
         val expectedHash = metadata.optString("sha256").lowercase()
         require(expectedBytes in 1..(16 * 1024 * 1024)) { "Размер снимка недопустим." }
@@ -686,6 +686,13 @@ class MainActivity : Activity() {
         require(root.optInt("schema_version", -1) == 1) { "Снимок VPN Gate имеет неизвестную схему." }
         val rows = root.getJSONArray("servers")
         require(rows.length() in 1..5000) { "Снимок VPN Gate пуст или слишком велик." }
+        require(root.optInt("server_count", -1) == rows.length()) {
+            "Количество серверов в снимке не совпадает с его заголовком."
+        }
+        require(snapshotIndex.optInt("server_count", -1) == rows.length() &&
+            metadata.optInt("server_count", -1) == rows.length()) {
+            "Количество серверов не совпадает с проверенным индексом."
+        }
 
         val servers = mutableListOf<VpnGateServer>()
         for (i in 0 until rows.length()) {
