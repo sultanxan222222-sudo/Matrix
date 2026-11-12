@@ -39,8 +39,9 @@ object SecureProfileVault {
         val inspected = VpnProfileInspector.inspect(profileText)
         require(
             inspected.format == ImportedVpnProfile.Format.WIREGUARD ||
-                inspected.format == ImportedVpnProfile.Format.AMNEZIAWG
-        ) { "Встроенный движок MATRIX сохраняет только WireGuard/AmneziaWG. OpenVPN передаётся внешнему клиенту." }
+                inspected.format == ImportedVpnProfile.Format.AMNEZIAWG ||
+                inspected.format == ImportedVpnProfile.Format.OPENVPN
+        ) { "Формат профиля не поддерживается встроенными движками MATRIX." }
 
         val cipher = Cipher.getInstance(CIPHER)
         cipher.init(Cipher.ENCRYPT_MODE, getOrCreateKey())
