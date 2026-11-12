@@ -639,10 +639,9 @@ class MainActivity : Activity() {
     }
 
     /**
-     * Loads the public VPN Gate relay directory. These are real volunteer-run VPN servers,
-     * not WARP profiles. VPN Gate publishes OpenVPN client configs; MATRIX currently uses
-     * WireGuard/AWG internally, so selected OpenVPN profiles are handed to a compatible
-     * external VPN app instead of being falsely treated as WireGuard configs.
+     * Loads the public VPN Gate relay directory. These are volunteer-run OpenVPN servers,
+     * not WARP profiles. Selected profiles are validated, encrypted in MATRIX's profile
+     * vault, and connected with the embedded OpenVPN 3 Core through MatrixVpnService.
      */
     private fun searchVpnServices() {
         status.text = "Поиск бесплатных VPN-серверов…"
