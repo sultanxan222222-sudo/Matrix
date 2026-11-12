@@ -186,8 +186,10 @@ impl TunBuilder for MatrixTunBuilder {
         self.bridge.bool_string("nativeSetSessionName", name)
     }
 
-    fn set_allow_family(&self, _address_family: i32, allow: bool) -> bool {
-        allow
+    fn set_allow_family(&self, _address_family: i32, _allow: bool) -> bool {
+        // Android's established TUN interface supports both families; the boolean
+        // is an instruction, while the callback result reports acceptance.
+        true
     }
 
     fn set_allow_local_dns(&self, _allow: bool) -> bool {
