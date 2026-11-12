@@ -1372,7 +1372,7 @@ class MainActivity : Activity() {
                     activeProfileName = saved.name
                     activeProfileProvider = saved.provider
                     SecureProfileVault.setActive(this, saved.id)
-                    SecureProfileStore.save(this, profileText)
+                    if (wireGuardConfig != null) SecureProfileStore.save(this, profileText)
                 } catch (e: Exception) {
                     activeProfileId = null
                     showError("Не удалось сохранить профиль", e.message ?: "Профиль проверен, но не добавлен в зашифрованный пул. Подключение останется доступно в памяти до закрытия приложения.")
