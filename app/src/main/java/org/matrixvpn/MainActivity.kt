@@ -116,7 +116,7 @@ class MainActivity : Activity() {
             setOnClickListener { chooseVpnProfile() }
         }
         val findWireGuardButton = Button(this).apply {
-            text = "WARP — отдельный режим"
+            text = "Получить новые WARP-профили"
             setOnClickListener { fetchFreeWarpProfile() }
         }
         val profilesButton = Button(this).apply {
