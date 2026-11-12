@@ -92,10 +92,16 @@ class MainActivity : Activity() {
         youtubeProbeInProgress = true
         lastYoutubeProbeAt = now
         status.text = "Встроенный OpenVPN 3 • CONNECTED\nПроверяю доступность YouTube через VPN…"
+        val testedProfileId = activeProfileId
+        val probeStartedAt = SystemClock.elapsedRealtime()
         Thread {
             val result = TunnelConnectivityProbe.checkYouTube()
+            val latencyMs = (SystemClock.elapsedRealtime() - probeStartedAt).coerceAtLeast(1L)
             runOnUiThread {
                 youtubeProbeInProgress = false
+                if (testedProfileId != null) {
+                    NodeHealthStore.record(this, testedProfileId, result.reachable, latencyMs)
+                }
                 if (openVpnState != MatrixVpnService.STATE_CONNECTED) return@runOnUiThread
                 status.text = if (result.reachable) {
                     "Встроенный OpenVPN 3 • CONNECTED\nYouTube доступен через VPN (HTTP " + result.httpCode + ")."
