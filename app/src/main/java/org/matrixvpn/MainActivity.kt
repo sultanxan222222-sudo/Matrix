@@ -351,57 +351,30 @@ class MainActivity : Activity() {
         connectButton.isEnabled = wireGuardConfig != null
         val loading = AlertDialog.Builder(this)
             .setTitle("Бесплатные VPN-серверы")
-            .setMessage("Загружаю список VPN Gate. Серверы предоставлены добровольцами; доступность и доверие к ним не гарантируются.")
+            .setMessage("Проверяю официальный каталог VPN Gate. При недоступности основного API будет использован проверенный снимок того же каталога. Серверы добровольческие; доверие к ним не гарантируется.")
             .setNegativeButton("Отмена", null)
             .create()
         loading.show()
         Thread {
-            var connection: java.net.HttpURLConnection? = null
             try {
-                connection = (java.net.URL("https://www.vpngate.net/api/iphone/").openConnection() as java.net.HttpURLConnection).apply {
-                    requestMethod = "GET"
-                    connectTimeout = 15000
-                    readTimeout = 20000
-                    setRequestProperty("User-Agent", "MATRIX-VPN-Android/0.5.1")
-                    setRequestProperty("Accept", "text/csv,text/plain,*/*")
-                    instanceFollowRedirects = true
-                }
-                val code = connection.responseCode
-                require(code in 200..299) { "Каталог VPN Gate ответил HTTP $code." }
-                val csv = connection.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
-                require(csv.length <= 20_000_000) { "Ответ каталога слишком большой." }
-                val lines = csv.lineSequence().filter { it.isNotBlank() && !it.startsWith("*") }.toList()
-                val headerIndex = lines.indexOfFirst { it.trimStart('#').startsWith("HostName,IP,Score,Ping,Speed,CountryLong", ignoreCase = true) }
-                require(headerIndex >= 0) { "Каталог вернул неизвестный формат." }
-                val servers = lines.drop(headerIndex + 1).mapNotNull { line ->
-                    val fields = parseCsvLine(line)
-                    if (fields.size < 15) return@mapNotNull null
-                    val host = fields[0].trim()
-                    val ip = fields[1].trim()
-                    val score = fields[2].toLongOrNull() ?: 0L
-                    val ping = fields[3].toLongOrNull() ?: -1L
-                    val speed = fields[4].toLongOrNull() ?: 0L
-                    val country = fields[5].trim().ifBlank { fields[6].trim().ifBlank { "Неизвестная страна" } }
-                    val sessions = fields[7].toIntOrNull() ?: 0
-                    val config = fields[14].trim()
-                    if (host.isBlank() || ip.isBlank() || config.isBlank()) null
-                    else VpnGateServer(host, ip, country, ping, speed, sessions, score, config)
-                }.sortedWith(compareByDescending<VpnGateServer> { it.score }.thenBy { if (it.ping < 0) Long.MAX_VALUE else it.ping }).take(30)
+                val catalog = fetchVpnGateCatalog()
+                val servers = catalog.first
                 runOnUiThread {
                     if (isFinishing || isDestroyed) return@runOnUiThread
                     loading.dismiss()
                     if (servers.isEmpty()) {
                         status.text = "Список бесплатных VPN-серверов пуст"
-                        showError("Серверы не найдены", "VPN Gate не вернул доступных конфигураций. Попробуйте позже.")
+                        showError("Серверы не найдены", "Каталог не вернул доступных конфигураций. Попробуйте позже.")
                     } else {
-                        status.text = "Найдено бесплатных VPN-серверов: ${servers.size}\nИсточник: VPN Gate (добровольческие серверы)"
+                        status.text = "Найдено бесплатных VPN-серверов: " + servers.size + "\nИсточник: " + catalog.second
                         val labels = servers.map { server ->
-                            val pingLabel = if (server.ping >= 0) "${server.ping} мс" else "ping неизвестен"
-                            val speedLabel = if (server.speed > 0) " • ${server.speed / 1_000_000} Мбит/с" else ""
-                            "${server.country} • ${server.host}\n$pingLabel • сессий: ${server.sessions}$speedLabel"
+                            val pingLabel = if (server.ping >= 0) server.ping.toString() + " мс" else "ping неизвестен"
+                            val speedLabel = if (server.speed > 0) " • " + (server.speed / 1_000_000) + " Мбит/с" else ""
+                            server.country + " • " + server.host + "\n" + pingLabel +
+                                " • сессий: " + server.sessions + speedLabel
                         }.toTypedArray()
                         AlertDialog.Builder(this)
-                            .setTitle("Бесплатные VPN-серверы (VPN Gate)")
+                            .setTitle("Бесплатные серверы VPN Gate")
                             .setItems(labels) { _, which -> offerVpnGateProfile(servers[which]) }
                             .setNegativeButton("Закрыть", null)
                             .setNeutralButton("О VPN Gate") { _, _ ->
@@ -416,12 +389,173 @@ class MainActivity : Activity() {
                     if (isFinishing || isDestroyed) return@runOnUiThread
                     loading.dismiss()
                     status.text = "Поиск бесплатных VPN-серверов не выполнен"
-                    showError("Ошибка поиска серверов", (e.message ?: "VPN Gate сейчас недоступен.") + "\n\nПопробуйте позже. WARP и ручной импорт работают отдельно.")
+                    showError("Ошибка поиска серверов", (e.message ?: "Каталоги VPN Gate сейчас недоступны.") +
+                        "\n\nWARP и ручной импорт работают отдельно.")
                 }
-            } finally {
-                connection?.disconnect()
             }
         }.start()
+    }
+
+    private fun fetchVpnGateCatalog(): Pair<List<VpnGateServer>, String> {
+        val officialFailure: Exception
+        try {
+            val csv = String(readHttpsBytes("https://www.vpngate.net/api/iphone/", 20 * 1024 * 1024), Charsets.UTF_8)
+            val lines = csv.lineSequence().filter { it.isNotBlank() && !it.startsWith("*") }.toList()
+            val header = lines.indexOfFirst {
+                it.trimStart('#').startsWith("HostName,IP,Score,Ping,Speed,CountryLong", ignoreCase = true)
+            }
+            require(header >= 0) { "Официальный CSV VPN Gate имеет неизвестный формат." }
+            val servers = lines.drop(header + 1).mapNotNull { line ->
+                val fields = parseCsvLine(line)
+                if (fields.size < 15) return@mapNotNull null
+                val host = fields[0].trim()
+                val ip = fields[1].trim()
+                val score = fields[2].toLongOrNull() ?: 0L
+                val ping = fields[3].toLongOrNull() ?: -1L
+                val speed = fields[4].toLongOrNull() ?: 0L
+                val country = fields[5].trim().ifBlank { fields[6].trim().ifBlank { "Неизвестная страна" } }
+                val sessions = fields[7].toIntOrNull() ?: 0
+                val config = fields[14].trim()
+                if (host.isBlank() || !isValidIpv4(ip) || config.isBlank()) null
+                else VpnGateServer(host, ip, country, ping, speed, sessions, score, config)
+            }.sortedWith(compareByDescending<VpnGateServer> { it.score }
+                .thenBy { if (it.ping < 0) Long.MAX_VALUE else it.ping }).take(30)
+            require(servers.isNotEmpty()) { "Официальный каталог не содержит пригодных конфигураций." }
+            return Pair(servers, "официальный VPN Gate API")
+        } catch (error: Exception) {
+            officialFailure = error
+        }
+
+        try {
+            val mirror = fetchVpnGateMirror()
+            return Pair(mirror.first, "зеркало VPN Gate • снимок " + mirror.second)
+        } catch (error: Exception) {
+            throw IllegalStateException(
+                "Официальный API: " + (officialFailure.message ?: "ошибка") +
+                    "\nПроверенное зеркало: " + (error.message ?: "ошибка")
+            )
+        }
+    }
+
+    private fun fetchVpnGateMirror(): Pair<List<VpnGateServer>, String> {
+        val indexBytes = readHttpsBytes(
+            "https://raw.githubusercontent.com/GeorgeXie2333/vpngate-list-mirror/main/latest.json",
+            128 * 1024
+        )
+        val index = org.json.JSONObject(String(indexBytes, Charsets.UTF_8))
+        require(index.optInt("schema_version", -1) == 1) { "Версия схемы зеркала VPN Gate не поддерживается." }
+        val commit = index.optString("data_commit")
+        require(commit.matches(Regex("[0-9a-fA-F]{40}"))) { "Неверный идентификатор снимка VPN Gate." }
+        val metadata = index.getJSONObject("files").getJSONObject("data/servers.json")
+        val expectedBytes = metadata.optInt("bytes", -1)
+        val expectedHash = metadata.optString("sha256").lowercase()
+        require(expectedBytes in 1..(16 * 1024 * 1024)) { "Размер снимка недопустим." }
+        require(expectedHash.matches(Regex("[0-9a-f]{64}"))) { "Хеш снимка недопустим." }
+
+        val urls = listOf(
+            "https://cdn.jsdelivr.net/gh/GeorgeXie2333/vpngate-list-mirror@" + commit + "/data/servers.json",
+            "https://raw.githubusercontent.com/GeorgeXie2333/vpngate-list-mirror/" + commit + "/data/servers.json"
+        )
+        var verified: ByteArray? = null
+        val errors = mutableListOf<String>()
+        for (url in urls) {
+            try {
+                val candidate = readHttpsBytes(url, 16 * 1024 * 1024)
+                require(candidate.size == expectedBytes) { "Размер снимка не совпал с индексом." }
+                require(sha256(candidate) == expectedHash) { "SHA-256 снимка не совпал с индексом." }
+                verified = candidate
+                break
+            } catch (error: Exception) {
+                errors.add(error.message ?: "ошибка загрузки")
+            }
+        }
+        val bytes = verified ?: throw IllegalStateException(errors.joinToString("; ").ifBlank {
+            "Не удалось получить проверенный снимок VPN Gate."
+        })
+        val root = org.json.JSONObject(String(bytes, Charsets.UTF_8))
+        require(root.optInt("schema_version", -1) == 1) { "Снимок VPN Gate имеет неизвестную схему." }
+        val rows = root.getJSONArray("servers")
+        require(rows.length() in 1..5000) { "Снимок VPN Gate пуст или слишком велик." }
+
+        val servers = mutableListOf<VpnGateServer>()
+        for (i in 0 until rows.length()) {
+            val item = rows.optJSONObject(i) ?: continue
+            val host = item.optString("hostname")
+            val ip = item.optString("ip")
+            val encoded = item.optString("openvpn_config_base64")
+            if (!host.matches(Regex("[A-Za-z0-9._-]{1,253}")) || !isValidIpv4(ip) || encoded.isBlank()) continue
+            try {
+                val config = android.util.Base64.decode(encoded, android.util.Base64.DEFAULT)
+                val configSize = item.optInt("openvpn_config_bytes", -1)
+                val configHash = item.optString("openvpn_config_sha256").lowercase()
+                if (config.isEmpty() || config.size > 1024 * 1024) continue
+                if (configSize > 0 && config.size != configSize) continue
+                if (configHash.isNotBlank() && sha256(config) != configHash) continue
+                val text = String(config, Charsets.UTF_8)
+                if (!text.contains("remote ", true) || !text.contains("client", true)) continue
+                servers.add(VpnGateServer(
+                    host = host,
+                    ip = ip,
+                    country = item.optString("country_name", "Неизвестная страна"),
+                    ping = if (item.isNull("ping_ms")) -1L else item.optLong("ping_ms", -1L),
+                    speed = item.optLong("speed_bps", 0L).coerceAtLeast(0L),
+                    sessions = item.optInt("num_vpn_sessions", 0).coerceAtLeast(0),
+                    score = item.optLong("score", 0L).coerceAtLeast(0L),
+                    openVpnConfigBase64 = encoded
+                ))
+            } catch (_: Exception) {
+                // Ignore a malformed row rather than discarding the verified snapshot.
+            }
+        }
+        require(servers.isNotEmpty()) { "Проверенный снимок не содержит корректных OpenVPN-конфигураций." }
+        return Pair(
+            servers.sortedWith(compareByDescending<VpnGateServer> { it.score }
+                .thenBy { if (it.ping < 0) Long.MAX_VALUE else it.ping }).take(30),
+            index.optString("fetched_at").replace("T", " ").take(16)
+        )
+    }
+
+    private fun readHttpsBytes(url: String, maxBytes: Int): ByteArray {
+        val connection = (java.net.URL(url).openConnection() as java.net.HttpURLConnection).apply {
+            requestMethod = "GET"
+            connectTimeout = 15000
+            readTimeout = 25000
+            instanceFollowRedirects = true
+            setRequestProperty("User-Agent", "MATRIX-VPN-Android/0.6.0")
+            setRequestProperty("Accept", "application/json,text/csv,text/plain,*/*")
+        }
+        try {
+            val code = connection.responseCode
+            require(code in 200..299) { "HTTP " + code + " при загрузке каталога." }
+            val output = java.io.ByteArrayOutputStream()
+            connection.inputStream.use { input ->
+                val buffer = ByteArray(8192)
+                var total = 0
+                while (true) {
+                    val count = input.read(buffer)
+                    if (count < 0) break
+                    total += count
+                    require(total <= maxBytes) { "Ответ каталога превысил лимит размера." }
+                    output.write(buffer, 0, count)
+                }
+            }
+            return output.toByteArray()
+        } finally {
+            connection.disconnect()
+        }
+    }
+
+    private fun sha256(bytes: ByteArray): String =
+        java.security.MessageDigest.getInstance("SHA-256")
+            .digest(bytes)
+            .joinToString("") { String.format("%02x", it) }
+
+    private fun isValidIpv4(value: String): Boolean {
+        val parts = value.split(".")
+        return parts.size == 4 && parts.all { part ->
+            part.isNotEmpty() && part.length <= 3 && part.all { it.isDigit() } &&
+                (part.toIntOrNull()?.let { it in 0..255 } == true)
+        }
     }
 
     private data class VpnGateServer(
