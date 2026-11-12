@@ -84,7 +84,7 @@ class MainActivity : Activity() {
             setPadding(8, 24, 8, 4)
         }
         val menuSubtitle = TextView(this).apply {
-            text = "PRIVATE NETWORK  /  0.6.1"
+            text = "PRIVATE NETWORK  /  0.6.3"
             textSize = 11f
             letterSpacing = 0.18f
             setTextColor(Color.rgb(166, 210, 190))
@@ -94,7 +94,7 @@ class MainActivity : Activity() {
         val connectionHeading = sectionHeading("СОСТОЯНИЕ СОЕДИНЕНИЯ")
         val helpHeading = sectionHeading("СПРАВКА")
         status = TextView(this).apply {
-            text = "Сборка 0.6.2\nVPN-туннель: не подключён\nПулы профилей и резервная проверка доступны"
+            text = "MATRIX GLASS  •  0.6.3\nVPN-туннель: не подключён\nЗащищённый пул профилей готов к работе"
             textSize = 16f
             setTextColor(Color.WHITE)
             gravity = Gravity.CENTER
@@ -140,8 +140,8 @@ class MainActivity : Activity() {
             setOnClickListener { importFromClipboard() }
         }
         connectButton = Button(this).apply {
-            text = "VPN  •  ВКЛЮЧИТЬ"
-            isEnabled = false
+            text = "VPN  •  НАЙТИ / ВКЛЮЧИТЬ"
+            isEnabled = true
             isAllCaps = false
             textSize = 17f
             minHeight = (76 * resources.displayMetrics.density).toInt()
@@ -242,16 +242,16 @@ class MainActivity : Activity() {
     private fun roundedPanel(fill: Int, stroke: Int, radiusDp: Float): GradientDrawable =
         GradientDrawable(GradientDrawable.Orientation.TL_BR, intArrayOf(fill, Color.argb(165, 7, 13, 12))).apply {
             cornerRadius = radiusDp * resources.displayMetrics.density
-            setStroke((1.2f * resources.displayMetrics.density).toInt().coerceAtLeast(1), stroke)
+            setStroke((1.6f * resources.displayMetrics.density).toInt().coerceAtLeast(1), stroke)
         }
 
     private fun glassSurface(tint: Int, stroke: Int, radiusDp: Float): GradientDrawable =
         GradientDrawable(
             GradientDrawable.Orientation.TL_BR,
             intArrayOf(
-                Color.argb(112, 210, 255, 238),
+                Color.argb(148, 224, 255, 246),
                 tint,
-                Color.argb(72, 25, 55, 48)
+                Color.argb(88, 70, 112, 100)
             )
         ).apply {
             cornerRadius = radiusDp * resources.displayMetrics.density
@@ -259,17 +259,17 @@ class MainActivity : Activity() {
         }
 
     private fun styleGlassModeButton(button: Button, active: Boolean) {
-        val gold = if (active) Color.argb(250, 255, 225, 145) else Color.argb(190, 191, 174, 132)
-        val tint = if (active) Color.argb(112, 205, 164, 76) else Color.argb(66, 140, 190, 168)
+        val gold = if (active) Color.argb(255, 255, 224, 145) else Color.argb(210, 190, 205, 184)
+        val tint = if (active) Color.argb(132, 205, 164, 76) else Color.argb(86, 105, 170, 150)
         button.background = glassSurface(tint, gold, 30f)
         button.backgroundTintList = null
         button.setTextColor(if (active) Color.rgb(255, 242, 205) else Color.rgb(232, 239, 222))
         button.textSize = 19f
         button.typeface = android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL)
-        button.minHeight = (88 * resources.displayMetrics.density).toInt()
-        button.elevation = if (active) 18f * resources.displayMetrics.density else 8f * resources.displayMetrics.density
+        button.minHeight = (94 * resources.displayMetrics.density).toInt()
+        button.elevation = if (active) 22f * resources.displayMetrics.density else 12f * resources.displayMetrics.density
         button.stateListAnimator = null
-        button.setShadowLayer(if (active) 16f else 5f, 0f, 0f, if (active) Color.rgb(255, 204, 105) else Color.rgb(108, 180, 151))
+        button.setShadowLayer(if (active) 22f else 9f, 0f, 0f, if (active) Color.rgb(255, 204, 105) else Color.rgb(108, 210, 175))
     }
 
     private fun refreshModeButtons() {
@@ -518,7 +518,7 @@ class MainActivity : Activity() {
      */
     private fun searchVpnServices() {
         status.text = "Поиск бесплатных VPN-серверов…"
-        connectButton.isEnabled = wireGuardConfig != null
+        connectButton.isEnabled = false
         val loading = AlertDialog.Builder(this)
             .setTitle("Бесплатные VPN-серверы")
             .setMessage("Проверяю официальный каталог VPN Gate. При недоступности основного API будет использован проверенный снимок того же каталога. Серверы добровольческие; доверие к ним не гарантируется.")
@@ -532,6 +532,7 @@ class MainActivity : Activity() {
                 runOnUiThread {
                     if (isFinishing || isDestroyed) return@runOnUiThread
                     loading.dismiss()
+                    connectButton.isEnabled = true
                     if (servers.isEmpty()) {
                         status.text = "Список бесплатных VPN-серверов пуст"
                         showError("Серверы не найдены", "Каталог не вернул доступных конфигураций. Попробуйте позже.")
@@ -558,6 +559,7 @@ class MainActivity : Activity() {
                 runOnUiThread {
                     if (isFinishing || isDestroyed) return@runOnUiThread
                     loading.dismiss()
+                    connectButton.isEnabled = true
                     status.text = "Поиск бесплатных VPN-серверов не выполнен"
                     showError("Ошибка поиска серверов", (e.message ?: "Каталоги VPN Gate сейчас недоступны.") +
                         "\n\nWARP и ручной импорт работают отдельно.")
