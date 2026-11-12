@@ -59,8 +59,8 @@ class MatrixVpnService : VpnService() {
 
     private fun stopOpenVpn() {
         try {
-            nativeStop()
             publishState(STATE_DISCONNECTING, "Останавливается OpenVPN…")
+            nativeStop()
             updateNotification("Отключение VPN…")
         } catch (error: Throwable) {
             publishState(STATE_ERROR, error.message ?: "Не удалось остановить OpenVPN.")
@@ -162,14 +162,16 @@ class MatrixVpnService : VpnService() {
 
     /** Transfers ownership of the established TUN descriptor to OpenVPN 3 Core. */
     @Synchronized
-    fun nativeEstablish(): Int =
-        try {
-            val descriptor = (tunnelBuilder ?: return -1).establish() ?: return -1
+    fun nativeEstablish(): Int {
+        return try {
+            val builder = tunnelBuilder ?: return -1
+            val descriptor = builder.establish() ?: return -1
             tunnelBuilder = null
             descriptor.detachFd()
         } catch (_: Exception) {
             -1
         }
+    }
 
     @Synchronized
     fun nativeTeardown(disconnect: Boolean) {
