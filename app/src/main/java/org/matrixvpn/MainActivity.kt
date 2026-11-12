@@ -94,7 +94,7 @@ class MainActivity : Activity() {
         val connectionHeading = sectionHeading("СОСТОЯНИЕ СОЕДИНЕНИЯ")
         val helpHeading = sectionHeading("СПРАВКА")
         status = TextView(this).apply {
-            text = "Сборка 0.6.1\nVPN-туннель: не подключён\nПулы профилей и резервная проверка доступны"
+            text = "Сборка 0.6.2\nVPN-туннель: не подключён\nПулы профилей и резервная проверка доступны"
             textSize = 16f
             setTextColor(Color.WHITE)
             gravity = Gravity.CENTER
