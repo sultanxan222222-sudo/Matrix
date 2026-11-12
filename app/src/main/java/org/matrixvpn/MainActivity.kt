@@ -1264,12 +1264,23 @@ class MainActivity : Activity() {
             val stored = SecureProfileVault.load(this, activeId)
             if (metadata != null && stored != null) {
                 try {
-                    wireGuardConfig = Config.parse(ByteArrayInputStream(stored.toByteArray(Charsets.UTF_8)))
+                    val inspected = VpnProfileInspector.inspect(stored)
+                    when (inspected.format) {
+                        ImportedVpnProfile.Format.OPENVPN -> {
+                            openVpnProfileText = stored
+                            wireGuardConfig = null
+                        }
+                        ImportedVpnProfile.Format.WIREGUARD, ImportedVpnProfile.Format.AMNEZIAWG -> {
+                            openVpnProfileText = null
+                            wireGuardConfig = Config.parse(ByteArrayInputStream(stored.toByteArray(Charsets.UTF_8)))
+                        }
+                        else -> throw IllegalArgumentException("Сохранённый профиль имеет неподдерживаемый формат.")
+                    }
                     activeProfileId = metadata.id
                     activeProfileName = metadata.name
                     activeProfileProvider = metadata.provider
-                    connectButton.isEnabled = true
-                    status.text = "Пул MATRIX восстановлен\nАктивный профиль: ${metadata.name}\nVPN-туннель: отключён"
+                    connectButton.isEnabled = wireGuardConfig != null || openVpnProfileText != null
+                    status.text = "Пул MATRIX восстановлен\nАктивный профиль: ${metadata.name}\nVPN-туннель: ${if (openVpnRunning) "работает" else "отключён"}"
                     return
                 } catch (_: Exception) {
                     SecureProfileVault.delete(this, activeId)
@@ -1284,6 +1295,7 @@ class MainActivity : Activity() {
                 "Сохранённый профиль больше не поддерживается."
             }
             wireGuardConfig = Config.parse(ByteArrayInputStream(legacy.toByteArray(Charsets.UTF_8)))
+            openVpnProfileText = null
             val saved = SecureProfileVault.save(this, "Мигрированный профиль", "Импорт", legacy)
             activeProfileId = saved.id
             activeProfileName = saved.name
@@ -1292,6 +1304,7 @@ class MainActivity : Activity() {
             status.text = "Старый профиль перенесён в пул MATRIX\nVPN-туннель: отключён"
         } catch (e: Exception) {
             wireGuardConfig = null
+            openVpnProfileText = null
             connectButton.isEnabled = false
             status.text = "Сохранённый профиль повреждён или больше не поддерживается."
             showError("Не удалось восстановить профиль", e.message ?: "Импортируйте конфигурацию заново.")
