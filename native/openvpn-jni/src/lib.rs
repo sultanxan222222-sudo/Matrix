@@ -1,4 +1,4 @@
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use jni::{
     objects::{GlobalRef, JObject, JString, JValue},
@@ -9,7 +9,7 @@ use openvpn_connect::{Client, Config, Credentials, Event, EventHandler, TunBuild
 
 #[derive(Clone)]
 struct AndroidBridge {
-    vm: JavaVM,
+    vm: Arc<JavaVM>,
     service: GlobalRef,
 }
 
@@ -270,7 +270,7 @@ pub extern "system" fn Java_org_matrixvpn_vpn_MatrixVpnService_nativeStart(
         }
 
         let bridge = AndroidBridge {
-            vm: env.get_java_vm().map_err(|e| e.to_string())?,
+            vm: Arc::new(env.get_java_vm().map_err(|e| e.to_string())?),
             service: env.new_global_ref(service).map_err(|e| e.to_string())?,
         };
         let handler = MatrixEventHandler {
