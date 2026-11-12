@@ -263,6 +263,10 @@ class MainActivity : Activity() {
     override fun onStart() {
         super.onStart()
         networkWatcher.start()
+        openVpnState = MatrixVpnService.currentState(this)
+        openVpnRunning = openVpnState == MatrixVpnService.STATE_CONNECTING ||
+            openVpnState == MatrixVpnService.STATE_CONNECTED ||
+            openVpnState == MatrixVpnService.STATE_DISCONNECTING
         if (!openVpnReceiverRegistered) {
             ContextCompat.registerReceiver(
                 this, openVpnStatusReceiver, IntentFilter(MatrixVpnService.ACTION_STATUS),
