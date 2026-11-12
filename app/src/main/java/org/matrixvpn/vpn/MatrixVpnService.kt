@@ -119,7 +119,7 @@ class MatrixVpnService : VpnService() {
         return try {
             if (Build.VERSION.SDK_INT < 33) return false
             val builder = tunnelBuilder ?: return false
-            builder.excludeRoute(IpPrefix(address, prefix))
+            builder.excludeRoute(IpPrefix(InetAddress.getByName(address), prefix))
             true
         } catch (_: Exception) {
             false
