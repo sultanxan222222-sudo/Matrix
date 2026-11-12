@@ -37,3 +37,6 @@ MATRIX is an Android VPN client with a dedicated WARP profile flow, an encrypted
 CI runs gradle testDebugUnitTest assembleDebug with JDK 17 and Android SDK 36. The debug APK is uploaded as matrix-vpn-debug-apk artifact for 14 days. CI success confirms compilation and unit tests, not real-device VPN operation.
 
 Target initial validation device: Realme Note 50, Android 15. Android 13–16 remain compatibility targets until tested.
+
+
+<!-- Native OpenVPN bridge compile fix verified; rebuild trigger. -->
