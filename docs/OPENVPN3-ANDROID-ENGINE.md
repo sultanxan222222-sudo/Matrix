@@ -1,6 +1,6 @@
 # MATRIX embedded OpenVPN 3 engine — integration record
 
-Status: engine selected and Android integration work started. This document is not a claim that the engine is already connected or that an APK is ready.
+Status: embedded-engine implementation is now present on branch feature/openvpn3-embedded-engine: the pinned OpenVPN 3 Rust Core, JNI adapter, Android VpnService TUN callbacks, separate WARP/OpenVPN app flows, and ARM64 CI build have been added. The first native build exposed a bindgen sysroot issue; the corrected target-specific Android sysroot is being verified by CI. This is not yet a claim that a downloadable APK or a real-device VPN session is ready.
 
 ## Pinned upstream engine
 
@@ -43,6 +43,6 @@ The JNI bridge must retain the service reference safely for the whole session, a
 5. Install on a real Android device and test a known-good OpenVPN server: permission prompt, protected transport socket, TUN establishment, DNS/routes, traffic through tunnel, disconnect and mode switching.
 6. Only then label the APK integrated/ready. CI compilation alone does not prove a live VPN connection.
 
-## Current known gap
+## Current validation gap
 
-The current MATRIX branch still uses AmneziaWG for tunnel establishment and hands VPN Gate .ovpn profiles to an external application. The Android `VpnService`/JNI adapter described above has not yet been implemented. Do not describe the current 0.6.3 APK as having embedded OpenVPN.
+The integration code is present in the new branch, but CI has not yet completed a successful ARM64 native build and Gradle APK build. Real-device testing on Android 15 is also still required to validate the TUN descriptor lifecycle, protected OpenVPN socket, DNS/routes, traffic through the tunnel, disconnect, and switching between WARP and OpenVPN. Do not label any APK as release-ready until these gates pass.
