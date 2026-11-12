@@ -156,7 +156,8 @@ class MainActivity : Activity() {
         val modePanel = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(18, 12, 18, 18)
-            background = glassSurface(Color.argb(42, 160, 255, 220), Color.argb(112, 205, 184, 132), 30f)
+            background = glassSurface(Color.argb(62, 160, 255, 220), Color.argb(145, 235, 202, 128), 30f)
+            elevation = 12f * resources.displayMetrics.density
             addView(modeHeading)
             addView(warpModeButton, menuButtonParams())
             addView(connectButton, menuButtonParams())
@@ -164,7 +165,8 @@ class MainActivity : Activity() {
         val statusPanel = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(18, 12, 18, 16)
-            background = glassSurface(Color.argb(34, 125, 225, 190), Color.argb(88, 150, 190, 165), 26f)
+            background = glassSurface(Color.argb(48, 125, 225, 190), Color.argb(112, 150, 205, 180), 26f)
+            elevation = 8f * resources.displayMetrics.density
             addView(connectionHeading)
             addView(status, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
             addView(networkStatus, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
@@ -285,7 +287,7 @@ class MainActivity : Activity() {
                 .setDuration(220L).start()
         }
         warpModeButton.text = if (tunnelUp && activeProfileProvider.equals("WARP", true)) "WARP  •  ОТКЛЮЧИТЬ" else "WARP  •  ВКЛЮЧИТЬ"
-        connectButton.text = if (tunnelUp && !activeProfileProvider.equals("WARP", true)) "VPN  •  ОТКЛЮЧИТЬ" else "VPN  •  ВКЛЮЧИТЬ"
+        connectButton.text = if (tunnelUp && !activeProfileProvider.equals("WARP", true)) "VPN  •  ОТКЛЮЧИТЬ" else "VPN  •  ПОИСК / ВКЛЮЧИТЬ"
     }
 
     private fun onWarpModeClick() {
@@ -335,7 +337,7 @@ class MainActivity : Activity() {
                     activeProfileProvider = chosen.provider
                     SecureProfileVault.setActive(this, chosen.id)
                     connectButton.isEnabled = true
-                    status.text = "$mode • выбран профиль: \${chosen.name}\nЗапрашиваю разрешение Android…"
+                    status.text = "$mode • выбран профиль: ${chosen.name}\nЗапрашиваю разрешение Android…"
                     val permission = VpnService.prepare(this)
                     if (permission != null) startActivityForResult(permission, vpnPermissionRequest) else startWireGuardTunnel()
                 } catch (e: Exception) {
