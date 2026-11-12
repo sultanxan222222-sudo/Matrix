@@ -206,70 +206,139 @@ class MainActivity : Activity() {
 
     /** Fetches a fresh free Cloudflare WARP-compatible WireGuard profile from the public generator API. */
     private fun fetchFreeWarpProfile() {
-        status.text = "Поиск бесплатного подключения WARP…"
+        val previousVaultProfile = SecureProfileVault.activeId(this)
+        status.text = "Получаю пул WARP-профилей AWG 2.0…"
         connectButton.isEnabled = false
         Thread {
-            var connection: java.net.HttpURLConnection? = null
+            val savedProfiles = mutableListOf<org.matrixvpn.profile.SavedVpnProfile>()
+            val errors = mutableListOf<String>()
             try {
-                val url = java.net.URL("https://awgconfig.com/api/warp?mode=legacy&count=1&dns=cloudflare")
-                connection = (url.openConnection() as java.net.HttpURLConnection).apply {
-                    requestMethod = "GET"
-                    connectTimeout = 15000
-                    readTimeout = 20000
-                    setRequestProperty("Accept", "application/json")
-                    setRequestProperty("User-Agent", "MATRIX-VPN-Android/0.4.0")
-                    instanceFollowRedirects = true
-                }
-                val code = connection.responseCode
-                val stream = if (code in 200..299) connection.inputStream else connection.errorStream
-                val response = stream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }
-                    ?: throw IllegalStateException("Сервис не вернул ответ (HTTP $code).")
-                require(response.length <= 1_000_000) { "Ответ сервиса слишком большой." }
-                if (code !in 200..299) throw IllegalStateException("Сервис WARP ответил с кодом HTTP $code.")
-                val json = org.json.JSONObject(response)
-                if (json.optBoolean("success", true).not()) {
-                    throw IllegalStateException(json.optString("error").ifBlank { "Сервис не смог создать профиль WARP." })
-                }
-                var encoded = json.optString("content")
-                if (encoded.isBlank()) {
-                    val configs = json.optJSONArray("configs")
-                    if (configs != null && configs.length() > 0) encoded = configs.getJSONObject(0).optString("content")
-                }
-                require(encoded.isNotBlank()) { "Сервис не вернул файл конфигурации." }
-                val profileText = try {
-                    String(android.util.Base64.decode(encoded, android.util.Base64.DEFAULT), Charsets.UTF_8)
-                } catch (_: IllegalArgumentException) {
-                    encoded
-                }
-                require(profileText.contains("[Interface]", ignoreCase = true) &&
-                    profileText.contains("[Peer]", ignoreCase = true)) {
-                    "Сервис вернул данные в неизвестном формате."
-                }
-                runOnUiThread {
-                    processProfileText(profileText, "Cloudflare WARP", "WARP")
-                    if (wireGuardConfig != null) {
-                        status.text = "Отдельный профиль WARP сохранён. Запрашиваю разрешение Android…"
-                        val prepareIntent = VpnService.prepare(this)
-                        if (prepareIntent != null) startActivityForResult(prepareIntent, vpnPermissionRequest)
-                        else startWireGuardTunnel()
+                // Request recently checked WARP endpoints first; use hostname mode if Lab is unavailable.
+                for (endpointMode in listOf("lab", "hostname")) {
+                    var connection: java.net.HttpURLConnection? = null
+                    try {
+                        val url = java.net.URL(
+                            "https://awgconfig.com/api/warp?mode=awg2&count=3&dns=cloudflare&endpointMode=$endpointMode"
+                        )
+                        connection = (url.openConnection() as java.net.HttpURLConnection).apply {
+                            requestMethod = "GET"
+                            connectTimeout = 20000
+                            readTimeout = 30000
+                            setRequestProperty("Accept", "application/json")
+                            setRequestProperty("User-Agent", "MATRIX-VPN-Android/0.6.0")
+                        }
+                        val code = connection.responseCode
+                        val stream = if (code in 200..299) connection.inputStream else connection.errorStream
+                        val response = stream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }
+                            ?: throw IllegalStateException("Генератор не вернул ответ (HTTP $code).")
+                        require(response.length <= 4_000_000) { "Ответ генератора слишком большой." }
+                        if (code !in 200..299) {
+                            errors.add("$endpointMode: HTTP $code")
+                            if (endpointMode == "lab" && code >= 500) continue
+                            throw IllegalStateException("Генератор WARP ответил HTTP $code.")
+                        }
+                        val json = org.json.JSONObject(response)
+                        if (!json.optBoolean("success", true)) {
+                            errors.add(json.optString("error").ifBlank { "Генератор отклонил запрос." })
+                            if (endpointMode == "lab") continue
+                            throw IllegalStateException(errors.last())
+                        }
+                        val configs = json.optJSONArray("configs")
+                        val encodedConfigs = mutableListOf<String>()
+                        if (configs != null && configs.length() > 0) {
+                            for (i in 0 until configs.length()) {
+                                val encoded = configs.optJSONObject(i)?.optString("content").orEmpty()
+                                if (encoded.isNotBlank()) encodedConfigs.add(encoded)
+                            }
+                        } else {
+                            json.optString("content").takeIf { it.isNotBlank() }?.let(encodedConfigs::add)
+                        }
+
+                        for (encoded in encodedConfigs) {
+                            if (savedProfiles.size >= 3) break
+                            try {
+                                val text = try {
+                                    String(android.util.Base64.decode(encoded, android.util.Base64.DEFAULT), Charsets.UTF_8)
+                                } catch (_: IllegalArgumentException) { encoded }
+                                require(text.contains("[Interface]", true) && text.contains("[Peer]", true)) {
+                                    "Конфигурация не похожа на WireGuard."
+                                }
+                                val inspected = VpnProfileInspector.inspect(text)
+                                require(inspected.format == ImportedVpnProfile.Format.WIREGUARD ||
+                                    inspected.format == ImportedVpnProfile.Format.AMNEZIAWG) {
+                                    "Формат не поддерживается встроенным движком."
+                                }
+                                Config.parse(ByteArrayInputStream(text.toByteArray(Charsets.UTF_8)))
+                                val number = savedProfiles.size + 1
+                                val endpoint = inspected.endpointHints.firstOrNull()?.take(42)
+                                val name = if (endpoint.isNullOrBlank()) "WARP AWG2 • $number"
+                                    else "WARP AWG2 • $number • $endpoint"
+                                savedProfiles.add(SecureProfileVault.save(this, name, "WARP", text))
+                            } catch (e: Exception) {
+                                errors.add("Профиль ${savedProfiles.size + 1}: ${e.message ?: "ошибка проверки"}")
+                            }
+                        }
+                        if (savedProfiles.isNotEmpty()) break
+                        errors.add("$endpointMode: совместимых конфигураций нет")
+                    } finally {
+                        connection?.disconnect()
                     }
                 }
+                require(savedProfiles.isNotEmpty()) {
+                    errors.joinToString("\n").ifBlank { "Генератор не выдал совместимых профилей." }
+                }
+                // New candidates do not replace the selected profile until the user chooses one.
+                SecureProfileVault.setActive(this, previousVaultProfile)
+                runOnUiThread {
+                    status.text = "Получено WARP-профилей AWG 2.0: ${savedProfiles.size}\nВыберите узел."
+                    connectButton.isEnabled = wireGuardConfig != null
+                    showGeneratedWarpProfiles(savedProfiles)
+                }
             } catch (e: Exception) {
+                SecureProfileVault.setActive(this, previousVaultProfile)
                 runOnUiThread {
                     connectButton.isEnabled = wireGuardConfig != null
-                    status.text = "Не удалось получить профиль WARP"
-                    showError(
-                        "Автоматическая настройка не удалась",
-                        (e.message ?: "Сервис WARP сейчас недоступен.") +
-                            "\n\nПроверьте интернет и попробуйте ещё раз. Генератор — сторонний бесплатный сервис, его доступность не гарантируется."
-                    )
+                    status.text = "Не удалось обновить пул WARP"
+                    showError("Генерация WARP не удалась",
+                        (e.message ?: "Сервис временно недоступен.") +
+                            "\n\nAWGConfig — сторонний генератор, а не официальный клиент Cloudflare.")
                 }
-            } finally {
-                connection?.disconnect()
             }
         }.start()
     }
 
+    private fun showGeneratedWarpProfiles(profiles: List<org.matrixvpn.profile.SavedVpnProfile>) {
+        val labels = profiles.map { profile ->
+            val text = SecureProfileVault.load(this, profile.id)
+            val endpoint = if (text == null) "адрес не определён"
+                else VpnProfileInspector.inspect(text).endpointHints.firstOrNull() ?: "адрес не определён"
+            "${profile.name}\n$endpoint\nAWG 2.0 • ещё не проверен на этом устройстве"
+        }.toTypedArray()
+        AlertDialog.Builder(this)
+            .setTitle("ПУЛ WARP • AWG 2.0")
+            .setMessage("Созданы отдельные WARP-регистрации с разными ключами. Выберите профиль для подключения.")
+            .setItems(labels) { _, which ->
+                val chosen = profiles[which]
+                try {
+                    val text = SecureProfileVault.load(this, chosen.id)
+                        ?: throw IllegalStateException("Не удалось расшифровать профиль.")
+                    wireGuardConfig = Config.parse(ByteArrayInputStream(text.toByteArray(Charsets.UTF_8)))
+                    activeProfileId = chosen.id
+                    activeProfileName = chosen.name
+                    activeProfileProvider = "WARP"
+                    SecureProfileVault.setActive(this, chosen.id)
+                    connectButton.isEnabled = true
+                    status.text = "Выбран отдельный режим WARP\nУзел: ${chosen.name}\nЗапрашиваю разрешение Android…"
+                    val permission = VpnService.prepare(this)
+                    if (permission != null) startActivityForResult(permission, vpnPermissionRequest)
+                    else startWireGuardTunnel()
+                } catch (e: Exception) {
+                    showError("Не удалось выбрать WARP-профиль", e.message ?: "Выберите другой узел.")
+                }
+            }
+            .setNegativeButton("Позже", null)
+            .show()
+    }
 
     /**
      * Loads the public VPN Gate relay directory. These are real volunteer-run VPN servers,
@@ -633,11 +702,11 @@ class MainActivity : Activity() {
                 if (probe.reachable) {
                     connected = true
                     finalText = "Подключено: $startingProfileName\n${probe.message}\nОценка основана на HTTPS-доступе через туннель; peer-handshake отдельно не подтверждён."
-                } else if (startingProvider != "WARP" && isMatrixLockdownEnabled()) {
+                } else if (isMatrixLockdownEnabled()) {
                     val backups = SecureProfileVault.list(this)
                         .filter {
                             it.id != startingProfileId &&
-                                it.provider != "WARP" &&
+                                (if (startingProvider.equals("WARP", true)) it.provider.equals("WARP", true) else !it.provider.equals("WARP", true)) &&
                                 it.format in setOf("WIREGUARD", "AMNEZIAWG")
                         }
                         .sortedByDescending { NodeHealthStore.score(this, it.id) }
