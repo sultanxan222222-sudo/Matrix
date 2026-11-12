@@ -243,6 +243,19 @@ class MainActivity : Activity() {
                             if (endpointMode == "lab") continue
                             throw IllegalStateException(errors.last())
                         }
+                        val appliedExtras = json.optJSONObject("appliedExtras")
+                            ?: throw IllegalStateException("Генератор не подтвердил применённые параметры профиля.")
+                        require(appliedExtras.optBoolean("mobile", false)) {
+                            "Генератор не применил мобильные параметры MATRIX."
+                        }
+                        require(appliedExtras.optBoolean("cps5", false)) {
+                            "Генератор не подтвердил дополнительные CPS-пакеты I2–I5."
+                        }
+                        val cpsStability = json.optString("cpsStability", "stable")
+                        require(cpsStability.equals("stable", true)) {
+                            "Генератор выбрал экспериментальный CPS-режим: $cpsStability."
+                        }
+
                         val configs = json.optJSONArray("configs")
                         val encodedConfigs = mutableListOf<String>()
                         if (configs != null && configs.length() > 0) {
