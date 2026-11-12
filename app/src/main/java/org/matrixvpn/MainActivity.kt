@@ -177,7 +177,7 @@ class MainActivity : Activity() {
             addView(menuContent, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         }
         listOf(importButton, findWireGuardButton, findVpnButton, pasteButton, profilesButton, recoveryButton).forEach { button ->
-            button.background = roundedPanel(Color.rgb(15, 34, 25), Color.rgb(72, 92, 53), 16f)
+            button.background = roundedPanel(Color.argb(218, 15, 34, 25), Color.argb(175, 72, 92, 53), 16f)
             button.backgroundTintList = null
             button.setTextColor(Color.rgb(245, 239, 215))
             button.textSize = 14f
@@ -210,14 +210,14 @@ class MainActivity : Activity() {
 
 
     private fun roundedPanel(fill: Int, stroke: Int, radiusDp: Float): GradientDrawable =
-        GradientDrawable(GradientDrawable.Orientation.TL_BR, intArrayOf(fill, Color.rgb(7, 13, 12))).apply {
+        GradientDrawable(GradientDrawable.Orientation.TL_BR, intArrayOf(fill, Color.argb(224, 7, 13, 12))).apply {
             cornerRadius = radiusDp * resources.displayMetrics.density
             setStroke((1.2f * resources.displayMetrics.density).toInt().coerceAtLeast(1), stroke)
         }
 
     private fun styleGlassModeButton(button: Button, active: Boolean) {
-        val gold = if (active) Color.rgb(255, 213, 102) else Color.rgb(132, 111, 63)
-        val fill = if (active) Color.rgb(48, 39, 19) else Color.rgb(23, 25, 20)
+        val gold = if (active) Color.argb(235, 255, 213, 102) else Color.argb(175, 132, 111, 63)
+        val fill = if (active) Color.argb(218, 48, 39, 19) else Color.argb(205, 23, 25, 20)
         button.background = roundedPanel(fill, gold, 26f)
         button.backgroundTintList = null
         button.setTextColor(if (active) Color.rgb(255, 230, 160) else Color.rgb(218, 207, 175))
