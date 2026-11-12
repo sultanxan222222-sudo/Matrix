@@ -58,9 +58,9 @@ class MainActivity : Activity() {
             runOnUiThread {
                 tunnelUp = newState == State.UP
                 status.text = if (tunnelUp) {
-                    "VPN-туннель: подключён\nПроверка HTTPS-доступа…\nМеханизм восстановления: прототип"
+                    "VPN-туннель: подключён\nПрофиль: $activeProfileName\nПроверяется доступ через туннель…"
                 } else {
-                    "VPN-туннель: отключён\nМеханизм восстановления: прототип"
+                    "VPN-туннель: отключён\nАктивный профиль: $activeProfileName"
                 }
                 connectButton.text = if (tunnelUp) "Отключить VPN" else "Подключить VPN"
             }
@@ -88,7 +88,7 @@ class MainActivity : Activity() {
         val connectionHeading = sectionHeading("СОСТОЯНИЕ СОЕДИНЕНИЯ")
         val helpHeading = sectionHeading("СПРАВКА")
         status = TextView(this).apply {
-            text = "Сборка 0.5.1\nVPN-туннель: не подключён\nАвтоматическое восстановление: прототип"
+            text = "Сборка 0.6.0\nVPN-туннель: не подключён\nПулы профилей и резервная проверка доступны"
             textSize = 16f
             setTextColor(Color.WHITE)
             gravity = Gravity.CENTER
@@ -114,7 +114,7 @@ class MainActivity : Activity() {
             setOnClickListener { showProfilePoolDialog() }
         }
         val recoveryButton = Button(this).apply {
-            text = "Безопасное авто-переключение"
+            text = "Резервное восстановление"
             setOnClickListener { showRecoveryStatus() }
         }
         val findVpnButton = Button(this).apply {
@@ -635,7 +635,11 @@ class MainActivity : Activity() {
                     finalText = "Подключено: $startingProfileName\n${probe.message}\nОценка основана на HTTPS-доступе через туннель; peer-handshake отдельно не подтверждён."
                 } else if (startingProvider != "WARP" && isMatrixLockdownEnabled()) {
                     val backups = SecureProfileVault.list(this)
-                        .filter { it.id != startingProfileId && it.format in setOf("WIREGUARD", "AMNEZIAWG") }
+                        .filter {
+                            it.id != startingProfileId &&
+                                it.provider != "WARP" &&
+                                it.format in setOf("WIREGUARD", "AMNEZIAWG")
+                        }
                         .sortedByDescending { NodeHealthStore.score(this, it.id) }
                     val attempts = mutableListOf<String>()
                     for (backup in backups) {
@@ -783,6 +787,9 @@ class MainActivity : Activity() {
                     val defaultName = suggestedName
                         ?: profile.endpointHints.firstOrNull()?.substringBeforeLast(':')?.takeIf { it.isNotBlank() }
                         ?: "Профиль ${System.currentTimeMillis()}"
+                    activeProfileId = null
+                    activeProfileName = defaultName
+                    activeProfileProvider = providerLabel
                     val saved = SecureProfileVault.save(this, defaultName, providerLabel, profileText)
                     activeProfileId = saved.id
                     activeProfileName = saved.name
@@ -790,7 +797,8 @@ class MainActivity : Activity() {
                     SecureProfileVault.setActive(this, saved.id)
                     SecureProfileStore.save(this, profileText)
                 } catch (e: Exception) {
-                    showError("Не удалось сохранить профиль", e.message ?: "Профиль проверен, но не добавлен в зашифрованный пул.")
+                    activeProfileId = null
+                    showError("Не удалось сохранить профиль", e.message ?: "Профиль проверен, но не добавлен в зашифрованный пул. Подключение останется доступно в памяти до закрытия приложения.")
                 }
             } else if (profile.format != ImportedVpnProfile.Format.OPENVPN) {
                 SecureProfileStore.clear(this)
@@ -805,7 +813,13 @@ class MainActivity : Activity() {
                 else if (wireGuardConfig != null) append("Конфигурация WireGuard проверена. Теперь можно запросить разрешение Android и подключиться.")
                 else if (profile.format == ImportedVpnProfile.Format.OPENVPN) append("Профиль OpenVPN распознан, но модуль для подключения OpenVPN пока не встроен.")
                 else append("Подходящая конфигурация WireGuard/AmneziaWG не загружена.")
-                append("\n\nПоддерживаемый профиль WireGuard/AmneziaWG добавлен в зашифрованный пул MATRIX (Android Keystore) и выбран активным. Откройте «Мои профили» для управления несколькими конфигурациями. Автоподключение при запуске приложения не выполняется.")
+                if (wireGuardConfig != null) {
+                    append("\n\nПрофиль WireGuard/AmneziaWG добавлен в зашифрованный пул MATRIX (Android Keystore) и выбран активным. Откройте «Мои профили» для управления несколькими конфигурациями. Автоподключение при запуске приложения не выполняется.")
+                } else if (profile.format == ImportedVpnProfile.Format.OPENVPN) {
+                    append("\n\nOpenVPN распознан, но встроенное подключение MATRIX пока не поддерживает этот формат. Профиль можно передать совместимому внешнему OpenVPN-клиенту.")
+                } else {
+                    append("\n\nПрофиль не сохранён и не может быть подключён встроенным движком MATRIX.")
+                }
             }
             status.text = if (wireGuardConfig != null) "Профиль $formatLabel готов: $activeProfileName\nVPN-туннель: ${if (tunnelUp) "подключён" else "отключён"}"
             else "Профиль проверен: $formatLabel\nVPN-туннель: отключён"
