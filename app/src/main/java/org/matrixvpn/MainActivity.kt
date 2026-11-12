@@ -77,7 +77,35 @@ class MainActivity : Activity() {
             connectButton.isEnabled = openVpnState != MatrixVpnService.STATE_CONNECTING &&
                 openVpnState != MatrixVpnService.STATE_DISCONNECTING
             refreshModeButtons()
+            if (openVpnState == MatrixVpnService.STATE_CONNECTED) {
+                checkYouTubeAfterOpenVpnConnect()
+            }
         }
+    }
+
+    private var youtubeProbeInProgress = false
+    private var lastYoutubeProbeAt = 0L
+
+    private fun checkYouTubeAfterOpenVpnConnect() {
+        val now = SystemClock.elapsedRealtime()
+        if (youtubeProbeInProgress || now - lastYoutubeProbeAt < 60_000L) return
+        youtubeProbeInProgress = true
+        lastYoutubeProbeAt = now
+        status.text = "Встроенный OpenVPN 3 • CONNECTED\nПроверяю доступность YouTube через VPN…"
+        Thread {
+            val result = TunnelConnectivityProbe.checkYouTube()
+            runOnUiThread {
+                youtubeProbeInProgress = false
+                if (openVpnState != MatrixVpnService.STATE_CONNECTED) return@runOnUiThread
+                status.text = if (result.reachable) {
+                    "Встроенный OpenVPN 3 • CONNECTED\nYouTube доступен через VPN (HTTP " + result.httpCode + ")."
+                } else {
+                    "Встроенный OpenVPN 3 • CONNECTED\nYouTube не прошёл проверку" +
+                        (result.httpCode?.let { " (HTTP " + it + ")" } ?: "") +
+                        ". Возможны ограничения узла, DNS или маршрутизации."
+                }
+            }
+        }.start()
     }
 
     private val matrixTunnel = object : Tunnel {
@@ -158,7 +186,7 @@ class MainActivity : Activity() {
             setOnClickListener { showRecoveryStatus() }
         }
         val findVpnButton = Button(this).apply {
-            text = "Каталог VPN Gate (OpenVPN)"
+            text = "Сеть добровольцев MATRIX"
             setOnClickListener { searchVpnServices() }
         }
         val pasteButton = Button(this).apply {
@@ -644,11 +672,11 @@ class MainActivity : Activity() {
      * vault, and connected with the embedded OpenVPN 3 Core through MatrixVpnService.
      */
     private fun searchVpnServices() {
-        status.text = "Поиск бесплатных VPN-серверов…"
+        status.text = "Поиск работающих добровольческих узлов MATRIX…"
         connectButton.isEnabled = false
         val loading = AlertDialog.Builder(this)
-            .setTitle("Бесплатные VPN-серверы")
-            .setMessage("Проверяю официальный каталог VPN Gate. При недоступности основного API будет использован проверенный снимок того же каталога. Серверы добровольческие; доверие к ним не гарантируется.")
+            .setTitle("Сеть добровольцев MATRIX")
+            .setMessage("Загружаю актуальные узлы добровольцев из официального каталога VPN Gate. Адреса меняются: MATRIX получает их заново при каждом поиске. Узлы принадлежат независимым операторам, а не MATRIX.")
             .setNegativeButton("Отмена", null)
             .create()
         loading.show()
@@ -664,7 +692,7 @@ class MainActivity : Activity() {
                         status.text = "Список бесплатных VPN-серверов пуст"
                         showError("Серверы не найдены", "Каталог не вернул доступных конфигураций. Попробуйте позже.")
                     } else {
-                        status.text = "Найдено бесплатных VPN-серверов: " + servers.size + "\nИсточник: " + catalog.second
+                        status.text = "Найдено узлов добровольческой сети: " + servers.size + "\nИсточник: " + catalog.second
                         val labels = servers.map { server ->
                             val pingLabel = if (server.ping >= 0) server.ping.toString() + " мс" else "ping неизвестен"
                             val speedLabel = if (server.speed > 0) " • " + (server.speed / 1_000_000) + " Мбит/с" else ""
@@ -672,10 +700,10 @@ class MainActivity : Activity() {
                                 " • сессий: " + server.sessions + speedLabel
                         }.toTypedArray()
                         AlertDialog.Builder(this)
-                            .setTitle("Бесплатные серверы VPN Gate")
+                            .setTitle("MATRIX • узлы добровольцев")
                             .setItems(labels) { _, which -> offerVpnGateProfile(servers[which]) }
                             .setNegativeButton("Закрыть", null)
-                            .setNeutralButton("О VPN Gate") { _, _ ->
+                            .setNeutralButton("Источник узлов") { _, _ ->
                                 try { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.vpngate.net/"))) }
                                 catch (_: Exception) { showError("Не удалось открыть сайт", "Откройте https://www.vpngate.net/ вручную.") }
                             }
@@ -943,11 +971,11 @@ class MainActivity : Activity() {
 
     private fun offerVpnGateProfile(server: VpnGateServer) {
         AlertDialog.Builder(this)
-            .setTitle("Бесплатный сервер: ${server.country}")
+            .setTitle("Узел добровольца: ${server.country}")
             .setMessage(
-                "Сервер: ${server.host} (${server.ip})\n\n" +
-                "MATRIX подключит этот OpenVPN-профиль встроенным OpenVPN 3 Core — без передачи конфигурации другому приложению. " +
-                "VPN Gate управляется добровольцами: не используйте такие узлы для банковских операций или конфиденциальных данных."
+                "Адрес: ${server.host} (${server.ip})\n\n" +
+                "Это компьютер независимого добровольца, доступный через сеть VPN Gate. MATRIX подключается к нему встроенным OpenVPN 3 Core. " +
+                "Оператор узла может видеть метаданные вашего трафика и ваш выходной IP. Не используйте такие узлы для банковских операций или конфиденциальных данных."
             )
             .setNegativeButton("Отмена", null)
             .setPositiveButton("Сохранить и подключить") { _, _ -> connectVpnGateProfile(server) }
@@ -962,7 +990,7 @@ class MainActivity : Activity() {
             require(inspected.format == ImportedVpnProfile.Format.OPENVPN) {
                 "VPN Gate вернул конфигурацию, которая не распознана как OpenVPN."
             }
-            val saved = SecureProfileVault.save(this, "VPN Gate • ${server.country} • ${server.host}", "VPN Gate", profileText)
+            val saved = SecureProfileVault.save(this, "MATRIX Community • ${server.country} • ${server.host}", "VPN Gate", profileText)
             openVpnProfileText = profileText
             wireGuardConfig = null
             activeProfileId = saved.id
