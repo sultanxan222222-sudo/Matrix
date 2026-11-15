@@ -605,10 +605,14 @@ class MainActivity : Activity() {
             state == MatrixVpnService.STATE_CONNECTED || state == MatrixVpnService.STATE_DISCONNECTING
     }
 
-    private fun isWireGuardActive(): Boolean = try {
-        tunnelUp || wireGuardBackend.getState(matrixTunnel) == State.UP
-    } catch (_: Exception) {
-        tunnelUp
+    private fun isWireGuardActive(): Boolean {
+        if (tunnelUp) return true
+        val backend = MatrixWireGuardSession.backend ?: return false
+        return try {
+            backend.getState(matrixTunnel) == State.UP
+        } catch (_: Exception) {
+            false
+        }
     }
 
     /** Stop and verify both engines before starting either one. Android has one VPN slot per user. */
