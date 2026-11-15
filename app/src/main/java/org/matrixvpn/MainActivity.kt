@@ -633,6 +633,7 @@ class MainActivity : Activity() {
                 openVpnState = MatrixVpnService.currentState(this)
                 openVpnRunning = isOpenVpnActive()
                 if (!openVpnStopped || !wireGuardStopped || isWireGuardActive() || isOpenVpnActive()) {
+                    engineSwitchInProgress = false
                     refreshModeButtons()
                     showError(
                         "Не удалось освободить VPN-подключение",
