@@ -132,6 +132,11 @@ class MainActivity : Activity() {
                     qualityTracker.reset()
                     val userStopped = manualDisconnectInProgress
                     manualDisconnectInProgress = false
+                    if (userStopped) {
+                        engineSwitchInProgress = false
+                        connectButton.isEnabled = true
+                        warpModeButton.isEnabled = true
+                    }
                     if (!userStopped && !autoRecoveryInProgress && isMatrixLockdownEnabled()) {
                         startCrossEngineRecovery(activeProfileId, message.ifBlank { "OpenVPN завершился с ошибкой." })
                     }
@@ -139,6 +144,9 @@ class MainActivity : Activity() {
                 MatrixVpnService.STATE_DISCONNECTED -> {
                     qualityTracker.reset()
                     manualDisconnectInProgress = false
+                    engineSwitchInProgress = false
+                    connectButton.isEnabled = true
+                    warpModeButton.isEnabled = true
                 }
             }
         }
@@ -477,9 +485,9 @@ class MainActivity : Activity() {
         }
         warpModeButton.text = if (warpActive) "WARP  •  ОТКЛЮЧИТЬ" else "WARP  •  ВКЛЮЧИТЬ"
         connectButton.text = when {
-            openVpnRunning && openVpnState == MatrixVpnService.STATE_DISCONNECTING -> "VPN  •  ОТКЛЮЧЕНИЕ…"
-            openVpnRunning -> "VPN  •  ОТКЛЮЧИТЬ"
-            tunnelUp && !activeProfileProvider.equals("WARP", true) -> "VPN  •  ОТКЛЮЧИТЬ"
+            openVpnActive && openVpnState == MatrixVpnService.STATE_DISCONNECTING -> "VPN  •  ОТКЛЮЧЕНИЕ…"
+            openVpnActive -> "VPN  •  ОТКЛЮЧИТЬ"
+            wireGuardActive && !activeProfileProvider.equals("WARP", true) -> "VPN  •  ОТКЛЮЧИТЬ"
             else -> "VPN  •  ПОИСК / ВКЛЮЧИТЬ"
         }
     }
@@ -502,7 +510,7 @@ class MainActivity : Activity() {
         private fun onVpnModeClick() {
         if (engineSwitchInProgress || wireGuardStartupInProgress || autoRecoveryInProgress) return
         if (isOpenVpnActive()) {
-            MatrixVpnService.stop(this)
+            connectOrDisconnect()
             return
         }
         if (isWireGuardActive()) {
@@ -588,7 +596,6 @@ class MainActivity : Activity() {
             val openVpnStopped = stopOpenVpnAndWait(12_000L)
             val wireGuardStopped = openVpnStopped && stopWireGuardAndWait(5_000L)
             runOnUiThread {
-                engineSwitchInProgress = false
                 warpModeButton.isEnabled = true
                 connectButton.isEnabled = true
                 openVpnState = MatrixVpnService.currentState(this)
@@ -632,6 +639,9 @@ class MainActivity : Activity() {
     private fun startEmbeddedOpenVpnTunnel() {
         val profile = openVpnProfileText
         if (profile.isNullOrBlank()) {
+            engineSwitchInProgress = false
+            connectButton.isEnabled = true
+            warpModeButton.isEnabled = true
             showError("Нет профиля OpenVPN", "Выберите или импортируйте профиль OpenVPN.")
             return
         }
@@ -1388,24 +1398,34 @@ class MainActivity : Activity() {
         if (engineSwitchInProgress || autoRecoveryInProgress) return
         if (isOpenVpnActive()) {
             manualDisconnectInProgress = true
+            engineSwitchInProgress = true
+            connectButton.isEnabled = false
+            warpModeButton.isEnabled = false
             MatrixVpnService.stop(this)
             return
         }
         if (isWireGuardActive()) {
             manualDisconnectInProgress = true
+            engineSwitchInProgress = true
             connectButton.isEnabled = false
+            warpModeButton.isEnabled = false
             Thread {
                 try {
                     wireGuardBackend.setState(matrixTunnel, State.DOWN, null)
                     runOnUiThread {
                         manualDisconnectInProgress = false
+                        engineSwitchInProgress = false
                         status.text = "VPN-туннель: отключён"
                         connectButton.isEnabled = true
+                        warpModeButton.isEnabled = true
+                        refreshModeButtons()
                     }
                 } catch (e: Exception) {
                     runOnUiThread {
                         manualDisconnectInProgress = false
+                        engineSwitchInProgress = false
                         connectButton.isEnabled = true
+                        warpModeButton.isEnabled = true
                         showError("Не удалось отключить VPN", e.message ?: "Не удалось остановить туннель.")
                     }
                 }
