@@ -13,6 +13,8 @@ import android.graphics.drawable.GradientDrawable
 import android.net.VpnService
 import android.net.Uri
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.os.SystemClock
 import android.provider.Settings
 import android.text.InputType
@@ -31,13 +33,22 @@ import org.amnezia.awg.backend.Tunnel.State
 import org.amnezia.awg.config.Config
 import org.matrixvpn.network.NetworkWatcher
 import org.matrixvpn.network.TunnelConnectivityProbe
+import org.matrixvpn.caravan.OpenVpnRouteScout
+import org.matrixvpn.caravan.RelayProbeStatus
+import org.matrixvpn.caravan.RelayProbeTarget
+import org.matrixvpn.profile.OpenVpnHttpProxy
 import org.matrixvpn.profile.ImportedVpnProfile
 import org.matrixvpn.profile.VpnProfileInspector
 import org.matrixvpn.profile.SecureProfileVault
 import org.matrixvpn.vpn.MatrixVpnService
 import androidx.core.content.ContextCompat
 import org.matrixvpn.recovery.NodeHealthStore
+import org.matrixvpn.recovery.TunnelQuality
+import org.matrixvpn.recovery.TunnelQualityTracker
 import java.io.ByteArrayInputStream
+
+private const val QUALITY_INTERVAL_MS = 30_000L
+private const val QUALITY_FIRST_PROBE_DELAY_MS = 4_000L
 
 class MainActivity : Activity() {
     private lateinit var status: TextView
@@ -64,6 +75,17 @@ class MainActivity : Activity() {
     private var openVpnRunning = false
     private var openVpnState: String = MatrixVpnService.STATE_DISCONNECTED
     private var openVpnReceiverRegistered = false
+    private val qualityHandler = Handler(Looper.getMainLooper())
+    private val qualityTracker = TunnelQualityTracker(failoverFailureThreshold = 3)
+    @Volatile private var qualityProbeInProgress = false
+    @Volatile private var autoRecoveryInProgress = false
+    private val qualityMonitorRunnable = object : Runnable {
+        override fun run() {
+            if (isFinishing || isDestroyed) return
+            if (isVpnSessionConnected()) runQualityProbe()
+            qualityHandler.postDelayed(this, QUALITY_INTERVAL_MS)
+        }
+    }
     private val openVpnStatusReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             openVpnState = intent?.getStringExtra(MatrixVpnService.EXTRA_STATE)
@@ -78,8 +100,18 @@ class MainActivity : Activity() {
             connectButton.isEnabled = openVpnState != MatrixVpnService.STATE_CONNECTING &&
                 openVpnState != MatrixVpnService.STATE_DISCONNECTING
             refreshModeButtons()
-            if (openVpnState == MatrixVpnService.STATE_CONNECTED) {
-                checkYouTubeAfterOpenVpnConnect()
+            when (openVpnState) {
+                MatrixVpnService.STATE_CONNECTED -> {
+                    if (!autoRecoveryInProgress) checkYouTubeAfterOpenVpnConnect()
+                    scheduleQualityMonitor(QUALITY_FIRST_PROBE_DELAY_MS)
+                }
+                MatrixVpnService.STATE_ERROR -> {
+                    qualityTracker.reset()
+                    if (!autoRecoveryInProgress && isMatrixLockdownEnabled()) {
+                        startCrossEngineRecovery(activeProfileId, message.ifBlank { "OpenVPN завершился с ошибкой." })
+                    }
+                }
+                MatrixVpnService.STATE_DISCONNECTED -> qualityTracker.reset()
             }
         }
     }
@@ -126,6 +158,8 @@ class MainActivity : Activity() {
                     "VPN-туннель: отключён\nАктивный профиль: $activeProfileName"
                 }
                 refreshModeButtons()
+                if (tunnelUp) scheduleQualityMonitor(QUALITY_FIRST_PROBE_DELAY_MS)
+                else if (!autoRecoveryInProgress) qualityTracker.reset()
             }
         }
         override fun isIpv4ResolutionPreferred(): Boolean = true
@@ -196,6 +230,10 @@ class MainActivity : Activity() {
             text = "Сеть добровольцев MATRIX"
             setOnClickListener { searchVpnServices() }
         }
+        val httpProxyButton = Button(this).apply {
+            text = "HTTP CONNECT • TCP-прокси"
+            setOnClickListener { configureHttpConnectProxy() }
+        }
         val pasteButton = Button(this).apply {
             text = "1. Импорт из буфера телефона"
             setOnClickListener { importFromClipboard() }
@@ -241,6 +279,7 @@ class MainActivity : Activity() {
             addView(findVpnButton, menuButtonParams())
             addView(findWireGuardButton, menuButtonParams())
             addView(profilesButton, menuButtonParams())
+            addView(httpProxyButton, menuButtonParams())
             addView(recoveryButton, menuButtonParams())
         }
         val menuContent = LinearLayout(this).apply {
@@ -266,7 +305,7 @@ class MainActivity : Activity() {
             clipToPadding = false
             addView(menuContent, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         }
-        listOf(importButton, findWireGuardButton, findVpnButton, pasteButton, profilesButton, recoveryButton).forEachIndexed { index, button ->
+        listOf(importButton, findWireGuardButton, findVpnButton, pasteButton, profilesButton, httpProxyButton, recoveryButton).forEachIndexed { index, button ->
             button.background = glassSurface(
                 if (index % 2 == 0) Color.argb(58, 125, 210, 180) else Color.argb(48, 160, 190, 220),
                 Color.argb(92, 170, 205, 175), 20f
@@ -318,6 +357,8 @@ class MainActivity : Activity() {
     override fun onStart() {
         super.onStart()
         networkWatcher.start()
+        qualityHandler.removeCallbacks(qualityMonitorRunnable)
+        qualityHandler.postDelayed(qualityMonitorRunnable, QUALITY_FIRST_PROBE_DELAY_MS)
         openVpnState = MatrixVpnService.currentState(this)
         openVpnRunning = openVpnState == MatrixVpnService.STATE_CONNECTING ||
             openVpnState == MatrixVpnService.STATE_CONNECTED ||
@@ -332,6 +373,7 @@ class MainActivity : Activity() {
     }
 
     override fun onStop() {
+        qualityHandler.removeCallbacks(qualityMonitorRunnable)
         networkWatcher.stop()
         if (openVpnReceiverRegistered) {
             try { unregisterReceiver(openVpnStatusReceiver) } catch (_: Exception) { }
@@ -1124,9 +1166,9 @@ class MainActivity : Activity() {
     private fun showRecoveryStatus() {
         val enabled = isMatrixLockdownEnabled()
         val message = if (enabled) {
-            "Системная блокировка Android включена для MATRIX. При неудачной HTTPS-проверке во время подключения MATRIX может проверить сохранённые резервные профили. Это проверка интернет-доступа через туннель, а не криптографического рукопожатия."
+            "Системная блокировка Android включена для MATRIX. При трёх последовательных неудачных HTTPS-проверках приложение автоматически переберёт сохранённые профили WireGuard/AmneziaWG и OpenVPN, отключая старый движок до запуска следующего. Качество измеряется, пока приложение открыто. HTTPS-проверка не подтверждает криптографическое рукопожатие."
         } else {
-            "Для автоматического переключения без утечки трафика откройте настройки Android → VPN → MATRIX, включите «Постоянная VPN» (Always-on VPN) и «Блокировать подключения без VPN» (Block connections without VPN). MATRIX не будет автоматически отключать один туннель и запускать другой, пока системная блокировка не подтверждена."
+            "Для безопасного автоматического переключения между OpenVPN и WireGuard/AmneziaWG откройте настройки Android → VPN → MATRIX, включите «Постоянная VPN» (Always-on VPN) и «Блокировать подключения без VPN» (Block connections without VPN). Без системной блокировки MATRIX не отключит текущий туннель ради другого."
         }
         AlertDialog.Builder(this)
             .setTitle(if (enabled) "Защита переключения активна" else "Нужно включить системную защиту")
@@ -1312,8 +1354,288 @@ class MainActivity : Activity() {
                 connectButton.isEnabled = true
                 connectButton.text = if (connected && tunnelUp) "Отключить VPN" else "Подключить VPN"
                 if (!connected && finalText.startsWith("Ошибка")) showError("Не удалось подключить VPN", finalText)
+                if (!connected && isMatrixLockdownEnabled() && !autoRecoveryInProgress) {
+                    startCrossEngineRecovery(startingProfileId, finalText)
+                }
             }
         }.start()
+    }
+
+
+    private fun isVpnSessionConnected(): Boolean =
+        tunnelUp || openVpnState == MatrixVpnService.STATE_CONNECTED ||
+            MatrixVpnService.currentState(this) == MatrixVpnService.STATE_CONNECTED
+
+    private fun scheduleQualityMonitor(delayMs: Long = QUALITY_INTERVAL_MS) {
+        if (isFinishing || isDestroyed) return
+        qualityHandler.removeCallbacks(qualityMonitorRunnable)
+        qualityHandler.postDelayed(qualityMonitorRunnable, delayMs)
+    }
+
+    /** Foreground quality monitor: three consecutive failed probes are needed before a switch. */
+    private fun runQualityProbe() {
+        if (qualityProbeInProgress || autoRecoveryInProgress || !isVpnSessionConnected()) return
+        qualityProbeInProgress = true
+        val checkedProfileId = activeProfileId
+        Thread {
+            val started = SystemClock.elapsedRealtime()
+            val result = TunnelConnectivityProbe.check()
+            val latency = (SystemClock.elapsedRealtime() - started).coerceAtLeast(1L)
+            if (checkedProfileId != null) NodeHealthStore.record(this, checkedProfileId, result.reachable, latency)
+            val snapshot = qualityTracker.record(result.reachable, latency)
+            runOnUiThread {
+                qualityProbeInProgress = false
+                if (!isVpnSessionConnected() || isFinishing || isDestroyed) return@runOnUiThread
+                val label = when (snapshot.quality) {
+                    TunnelQuality.HEALTHY -> "ХОРОШЕЕ"
+                    TunnelQuality.DEGRADED -> "НЕСТАБИЛЬНО"
+                    TunnelQuality.UNREACHABLE -> "НЕТ ДОСТУПА"
+                    TunnelQuality.UNKNOWN -> "ПРОВЕРКА"
+                }
+                networkStatus.text = "VPN • $label • \${if (result.reachable) "\${latency} мс" else "ошибка проверки"}"
+                if (snapshot.shouldFailover) {
+                    if (isMatrixLockdownEnabled()) {
+                        startCrossEngineRecovery(checkedProfileId, "Три последовательные проверки внешней сети завершились ошибкой.")
+                    } else {
+                        status.text = "VPN-туннель запущен, но внешний доступ не подтверждён.\\nДля автоматического переключения включите Always-on VPN и блокировку подключений без VPN."
+                    }
+                } else if (!result.reachable) {
+                    status.text = "Проверка качества VPN: неудача \${snapshot.consecutiveFailures}/3.\\n\${result.message}"
+                }
+            }
+        }.start()
+    }
+
+    /**
+     * Switches sequentially between both embedded engines. Android lockdown
+     * is required so a handover failure cannot expose traffic outside the VPN.
+     */
+    private fun startCrossEngineRecovery(excludedProfileId: String?, reason: String) {
+        if (autoRecoveryInProgress) return
+        if (!isMatrixLockdownEnabled()) {
+            status.text = "$reason\\nАвтоматический переход заблокирован: включите Android Always-on VPN и блокировку подключений без VPN."
+            return
+        }
+        if (VpnService.prepare(this) != null) {
+            status.text = "$reason\\nAndroid ещё не предоставил MATRIX разрешение VPN; выполните подключение вручную."
+            return
+        }
+
+        autoRecoveryInProgress = true
+        qualityHandler.removeCallbacks(qualityMonitorRunnable)
+        connectButton.isEnabled = false
+        status.text = "$reason\\nЗапускаю безопасное переключение между VPN-движками…"
+
+        val candidates = SecureProfileVault.list(this)
+            .filter { it.id != excludedProfileId }
+            .sortedWith(compareByDescending<org.matrixvpn.profile.SavedVpnProfile> { NodeHealthStore.score(this, it.id) }
+                .thenByDescending { it.createdAt })
+
+        Thread {
+            var selectedProfile: org.matrixvpn.profile.SavedVpnProfile? = null
+            var selectedRaw: String? = null
+            var selectedConfig: Config? = null
+            var selectedEngine = ""
+            val attempts = mutableListOf<String>()
+
+            fun stopOpenVpnAndWait() {
+                val current = MatrixVpnService.currentState(this)
+                if (current == MatrixVpnService.STATE_CONNECTED ||
+                    current == MatrixVpnService.STATE_CONNECTING ||
+                    current == MatrixVpnService.STATE_DISCONNECTING) {
+                    MatrixVpnService.stop(this)
+                    waitForOpenVpnStop(12_000L)
+                }
+            }
+
+            fun stopWireGuard() {
+                try {
+                    wireGuardBackend.setState(matrixTunnel, State.DOWN, null)
+                    Thread.sleep(500L)
+                } catch (_: Exception) { }
+            }
+
+            try {
+                stopOpenVpnAndWait()
+                if (tunnelUp) stopWireGuard()
+
+                for (candidate in candidates) {
+                    if (selectedProfile != null) break
+                    try {
+                        val raw = SecureProfileVault.load(this, candidate.id) ?: continue
+                        val inspected = VpnProfileInspector.inspect(raw)
+                        when (inspected.format) {
+                            ImportedVpnProfile.Format.WIREGUARD,
+                            ImportedVpnProfile.Format.AMNEZIAWG -> {
+                                val config = Config.parse(ByteArrayInputStream(raw.toByteArray(Charsets.UTF_8)))
+                                wireGuardBackend.setState(matrixTunnel, State.UP, config)
+                                Thread.sleep(1_500L)
+                                val started = SystemClock.elapsedRealtime()
+                                val probe = TunnelConnectivityProbe.check()
+                                val latency = (SystemClock.elapsedRealtime() - started).coerceAtLeast(1L)
+                                NodeHealthStore.record(this, candidate.id, probe.reachable, latency)
+                                attempts.add("\${candidate.name} • AmneziaWG/WireGuard")
+                                if (probe.reachable) {
+                                    selectedProfile = candidate
+                                    selectedRaw = raw
+                                    selectedConfig = config
+                                    selectedEngine = "WireGuard/AmneziaWG"
+                                } else {
+                                    stopWireGuard()
+                                }
+                            }
+                            ImportedVpnProfile.Format.OPENVPN -> {
+                                val needsCredentials = raw.lineSequence().any {
+                                    it.trim().startsWith("auth-user-pass", true)
+                                } && !raw.contains("<auth-user-pass>", true)
+                                if (needsCredentials && !candidate.provider.equals("VPN Gate", true)) {
+                                    attempts.add("\${candidate.name} • пропущен: нужны учётные данные")
+                                    continue
+                                }
+                                val user = if (candidate.provider.equals("VPN Gate", true)) "vpn" else ""
+                                val pass = if (candidate.provider.equals("VPN Gate", true)) "vpn" else ""
+                                MatrixVpnService.start(this, raw, user, pass)
+                                val connected = waitForOpenVpnConnected(45_000L)
+                                if (connected) {
+                                    Thread.sleep(1_000L)
+                                    val started = SystemClock.elapsedRealtime()
+                                    val probe = TunnelConnectivityProbe.check()
+                                    val latency = (SystemClock.elapsedRealtime() - started).coerceAtLeast(1L)
+                                    NodeHealthStore.record(this, candidate.id, probe.reachable, latency)
+                                    attempts.add("\${candidate.name} • OpenVPN 3")
+                                    if (probe.reachable) {
+                                        selectedProfile = candidate
+                                        selectedRaw = raw
+                                        selectedEngine = "OpenVPN 3"
+                                    }
+                                } else {
+                                    attempts.add("\${candidate.name} • OpenVPN 3 не подключился")
+                                }
+                                if (selectedProfile == null) stopOpenVpnAndWait()
+                            }
+                            else -> attempts.add("\${candidate.name} • неподдерживаемый формат")
+                        }
+                    } catch (error: Exception) {
+                        attempts.add("\${candidate.name} • ошибка: \${error.message ?: error.javaClass.simpleName}")
+                        stopOpenVpnAndWait()
+                        stopWireGuard()
+                    }
+                }
+            } catch (error: Exception) {
+                attempts.add("Ошибка восстановления: \${error.message ?: error.javaClass.simpleName}")
+            }
+
+            val recovered = selectedProfile != null
+            runOnUiThread {
+                autoRecoveryInProgress = false
+                connectButton.isEnabled = true
+                if (recovered) {
+                    val chosen = selectedProfile!!
+                    activeProfileId = chosen.id
+                    activeProfileName = chosen.name
+                    activeProfileProvider = chosen.provider
+                    SecureProfileVault.setActive(this, chosen.id)
+                    if (selectedEngine == "OpenVPN 3") {
+                        openVpnProfileText = selectedRaw
+                        wireGuardConfig = null
+                        openVpnState = MatrixVpnService.currentState(this)
+                        openVpnRunning = openVpnState == MatrixVpnService.STATE_CONNECTED
+                    } else {
+                        openVpnProfileText = null
+                        wireGuardConfig = selectedConfig
+                    }
+                    qualityTracker.reset()
+                    status.text = "Автоматическое переключение выполнено.\\nДвижок: $selectedEngine\\nПрофиль: \${chosen.name}\\nПроверка внешнего HTTPS успешна."
+                    refreshModeButtons()
+                    scheduleQualityMonitor(QUALITY_FIRST_PROBE_DELAY_MS)
+                } else {
+                    stopOpenVpnAndWait()
+                    stopWireGuard()
+                    status.text = "Автоматическое восстановление не нашло работающий профиль.\\nПопыток: \${attempts.size}.\\nСистемная блокировка Android остаётся включённой: обычный трафик не должен выходить напрямую.\\n" +
+                        attempts.take(8).joinToString("\\n")
+                    refreshModeButtons()
+                }
+            }
+        }.start()
+    }
+
+    private fun waitForOpenVpnConnected(timeoutMs: Long): Boolean {
+        val deadline = SystemClock.elapsedRealtime() + timeoutMs
+        while (SystemClock.elapsedRealtime() < deadline) {
+            when (MatrixVpnService.currentState(this)) {
+                MatrixVpnService.STATE_CONNECTED -> return true
+                MatrixVpnService.STATE_ERROR, MatrixVpnService.STATE_DISCONNECTED -> return false
+            }
+            Thread.sleep(300L)
+        }
+        return false
+    }
+
+    private fun waitForOpenVpnStop(timeoutMs: Long): Boolean {
+        val deadline = SystemClock.elapsedRealtime() + timeoutMs
+        while (SystemClock.elapsedRealtime() < deadline) {
+            when (MatrixVpnService.currentState(this)) {
+                MatrixVpnService.STATE_DISCONNECTED, MatrixVpnService.STATE_ERROR -> return true
+            }
+            Thread.sleep(250L)
+        }
+        return false
+    }
+
+    private fun configureHttpConnectProxy() {
+        var profile = openVpnProfileText
+        if (profile.isNullOrBlank() && activeProfileId != null) {
+            val stored = SecureProfileVault.load(this, activeProfileId!!)
+            if (stored != null && VpnProfileInspector.inspect(stored).format == ImportedVpnProfile.Format.OPENVPN) {
+                profile = stored
+            }
+        }
+        if (profile.isNullOrBlank()) {
+            showError("Нужен OpenVPN TCP-профиль", "Сначала выберите или импортируйте OpenVPN-профиль с TCP remote. Для UDP-профилей HTTP CONNECT не подходит.")
+            return
+        }
+
+        val hostInput = EditText(this).apply {
+            hint = "Адрес HTTP-прокси (например proxy.example)"
+            singleLine = true
+            setText("")
+        }
+        val portInput = EditText(this).apply {
+            hint = "Порт (например 8080)"
+            inputType = InputType.TYPE_CLASS_NUMBER
+            singleLine = true
+        }
+        val fields = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(24, 8, 24, 8)
+            addView(hostInput)
+            addView(portInput)
+        }
+        AlertDialog.Builder(this)
+            .setTitle("HTTP CONNECT • TCP")
+            .setMessage("Укажите свой доверенный HTTP-прокси. MATRIX сохранит отдельную копию профиля с http-proxy. Это прокси-транспорт, а не гарантия обхода DPI. В этой версии прокси с авторизацией не поддерживаются.")
+            .setView(fields)
+            .setNegativeButton("Отмена", null)
+            .setPositiveButton("Сохранить копию") { _, _ ->
+                try {
+                    val updated = OpenVpnHttpProxy.apply(profile, hostInput.text.toString(), portInput.text.toString().toInt())
+                    val baseName = "$activeProfileName • HTTP CONNECT".take(72)
+                    val saved = SecureProfileVault.save(this, baseName, activeProfileProvider, updated)
+                    openVpnProfileText = updated
+                    wireGuardConfig = null
+                    activeProfileId = saved.id
+                    activeProfileName = saved.name
+                    activeProfileProvider = saved.provider
+                    pendingOpenVpnStart = false
+                    SecureProfileVault.setActive(this, saved.id)
+                    connectButton.isEnabled = true
+                    status.text = "Создан отдельный TCP-прокси профиль.\\n\${saved.name}\\nИсходная конфигурация сохранена без изменений."
+                    refreshModeButtons()
+                } catch (error: Exception) {
+                    showError("Не удалось настроить HTTP CONNECT", error.message ?: "Проверьте TCP-профиль и адрес прокси.")
+                }
+            }
+            .show()
     }
 
     /**
