@@ -1758,13 +1758,13 @@ class MainActivity : Activity() {
 
         val hostInput = EditText(this).apply {
             hint = "Адрес HTTP-прокси (например proxy.example)"
-            singleLine = true
+            setSingleLine(true)
             setText("")
         }
         val portInput = EditText(this).apply {
             hint = "Порт (например 8080)"
             inputType = InputType.TYPE_CLASS_NUMBER
-            singleLine = true
+            setSingleLine(true)
         }
         val fields = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
