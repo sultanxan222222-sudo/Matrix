@@ -1415,15 +1415,15 @@ class MainActivity : Activity() {
                     TunnelQuality.UNREACHABLE -> "НЕТ ДОСТУПА"
                     TunnelQuality.UNKNOWN -> "ПРОВЕРКА"
                 }
-                networkStatus.text = "VPN • $label • \${if (result.reachable) "\${latency} мс" else "ошибка проверки"}"
+                networkStatus.text = "VPN • $label • ${if (result.reachable) "${latency} мс" else "ошибка проверки"}"
                 if (snapshot.shouldFailover) {
                     if (isMatrixLockdownEnabled()) {
                         startCrossEngineRecovery(checkedProfileId, "Три последовательные проверки внешней сети завершились ошибкой.")
                     } else {
-                        status.text = "VPN-туннель запущен, но внешний доступ не подтверждён.\\nДля автоматического переключения включите Always-on VPN и блокировку подключений без VPN."
+                        status.text = "VPN-туннель запущен, но внешний доступ не подтверждён.\nДля автоматического переключения включите Always-on VPN и блокировку подключений без VPN."
                     }
                 } else if (!result.reachable) {
-                    status.text = "Проверка качества VPN: неудача \${snapshot.consecutiveFailures}/3.\\n\${result.message}"
+                    status.text = "Проверка качества VPN: неудача ${snapshot.consecutiveFailures}/3.\n${result.message}"
                 }
             }
         }.start()
@@ -1436,18 +1436,18 @@ class MainActivity : Activity() {
     private fun startCrossEngineRecovery(excludedProfileId: String?, reason: String) {
         if (autoRecoveryInProgress) return
         if (!isMatrixLockdownEnabled()) {
-            status.text = "$reason\\nАвтоматический переход заблокирован: включите Android Always-on VPN и блокировку подключений без VPN."
+            status.text = "$reason\nАвтоматический переход заблокирован: включите Android Always-on VPN и блокировку подключений без VPN."
             return
         }
         if (VpnService.prepare(this) != null) {
-            status.text = "$reason\\nAndroid ещё не предоставил MATRIX разрешение VPN; выполните подключение вручную."
+            status.text = "$reason\nAndroid ещё не предоставил MATRIX разрешение VPN; выполните подключение вручную."
             return
         }
 
         autoRecoveryInProgress = true
         qualityHandler.removeCallbacks(qualityMonitorRunnable)
         connectButton.isEnabled = false
-        status.text = "$reason\\nЗапускаю безопасное переключение между VPN-движками…"
+        status.text = "$reason\nЗапускаю безопасное переключение между VPN-движками…"
 
         val candidates = SecureProfileVault.list(this)
             .filter { it.id != excludedProfileId }
@@ -1497,7 +1497,7 @@ class MainActivity : Activity() {
                                 val probe = TunnelConnectivityProbe.check()
                                 val latency = (SystemClock.elapsedRealtime() - started).coerceAtLeast(1L)
                                 NodeHealthStore.record(this, candidate.id, probe.reachable, latency)
-                                attempts.add("\${candidate.name} • AmneziaWG/WireGuard")
+                                attempts.add("${candidate.name} • AmneziaWG/WireGuard")
                                 if (probe.reachable) {
                                     selectedProfile = candidate
                                     selectedRaw = raw
@@ -1512,7 +1512,7 @@ class MainActivity : Activity() {
                                     it.trim().startsWith("auth-user-pass", true)
                                 } && !raw.contains("<auth-user-pass>", true)
                                 if (needsCredentials && !candidate.provider.equals("VPN Gate", true)) {
-                                    attempts.add("\${candidate.name} • пропущен: нужны учётные данные")
+                                    attempts.add("${candidate.name} • пропущен: нужны учётные данные")
                                     continue
                                 }
                                 val user = if (candidate.provider.equals("VPN Gate", true)) "vpn" else ""
@@ -1525,27 +1525,27 @@ class MainActivity : Activity() {
                                     val probe = TunnelConnectivityProbe.check()
                                     val latency = (SystemClock.elapsedRealtime() - started).coerceAtLeast(1L)
                                     NodeHealthStore.record(this, candidate.id, probe.reachable, latency)
-                                    attempts.add("\${candidate.name} • OpenVPN 3")
+                                    attempts.add("${candidate.name} • OpenVPN 3")
                                     if (probe.reachable) {
                                         selectedProfile = candidate
                                         selectedRaw = raw
                                         selectedEngine = "OpenVPN 3"
                                     }
                                 } else {
-                                    attempts.add("\${candidate.name} • OpenVPN 3 не подключился")
+                                    attempts.add("${candidate.name} • OpenVPN 3 не подключился")
                                 }
                                 if (selectedProfile == null) stopOpenVpnAndWait()
                             }
-                            else -> attempts.add("\${candidate.name} • неподдерживаемый формат")
+                            else -> attempts.add("${candidate.name} • неподдерживаемый формат")
                         }
                     } catch (error: Exception) {
-                        attempts.add("\${candidate.name} • ошибка: \${error.message ?: error.javaClass.simpleName}")
+                        attempts.add("${candidate.name} • ошибка: ${error.message ?: error.javaClass.simpleName}")
                         stopOpenVpnAndWait()
                         stopWireGuard()
                     }
                 }
             } catch (error: Exception) {
-                attempts.add("Ошибка восстановления: \${error.message ?: error.javaClass.simpleName}")
+                attempts.add("Ошибка восстановления: ${error.message ?: error.javaClass.simpleName}")
             }
 
             val recovered = selectedProfile != null
@@ -1568,14 +1568,14 @@ class MainActivity : Activity() {
                         wireGuardConfig = selectedConfig
                     }
                     qualityTracker.reset()
-                    status.text = "Автоматическое переключение выполнено.\\nДвижок: $selectedEngine\\nПрофиль: \${chosen.name}\\nПроверка внешнего HTTPS успешна."
+                    status.text = "Автоматическое переключение выполнено.\nДвижок: $selectedEngine\nПрофиль: ${chosen.name}\nПроверка внешнего HTTPS успешна."
                     refreshModeButtons()
                     scheduleQualityMonitor(QUALITY_FIRST_PROBE_DELAY_MS)
                 } else {
                     stopOpenVpnAndWait()
                     stopWireGuard()
-                    status.text = "Автоматическое восстановление не нашло работающий профиль.\\nПопыток: \${attempts.size}.\\nСистемная блокировка Android остаётся включённой: обычный трафик не должен выходить напрямую.\\n" +
-                        attempts.take(8).joinToString("\\n")
+                    status.text = "Автоматическое восстановление не нашло работающий профиль.\nПопыток: ${attempts.size}.\nСистемная блокировка Android остаётся включённой: обычный трафик не должен выходить напрямую.\n" +
+                        attempts.take(8).joinToString("\n")
                     refreshModeButtons()
                 }
             }
@@ -1652,7 +1652,7 @@ class MainActivity : Activity() {
                     pendingOpenVpnStart = false
                     SecureProfileVault.setActive(this, saved.id)
                     connectButton.isEnabled = true
-                    status.text = "Создан отдельный TCP-прокси профиль.\\n\${saved.name}\\nИсходная конфигурация сохранена без изменений."
+                    status.text = "Создан отдельный TCP-прокси профиль.\n${saved.name}\nИсходная конфигурация сохранена без изменений."
                     refreshModeButtons()
                 } catch (error: Exception) {
                     showError("Не удалось настроить HTTP CONNECT", error.message ?: "Проверьте TCP-профиль и адрес прокси.")
