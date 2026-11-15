@@ -114,6 +114,7 @@ class MainActivity : Activity() {
     private var openVpnReceiverRegistered = false
     private val qualityHandler = Handler(Looper.getMainLooper())
     private var fistIconAnimation: Animatable? = null
+    private var activityStarted = false
     private val qualityTracker = TunnelQualityTracker(failoverFailureThreshold = 3)
     @Volatile private var qualityProbeInProgress = false
     @Volatile private var autoRecoveryInProgress = false
@@ -414,7 +415,7 @@ class MainActivity : Activity() {
         setContentView(MatrixRainView(this))
         window.decorView.postDelayed({
             setContentView(screenRoot)
-            fistIconAnimation?.start()
+            if (activityStarted) fistIconAnimation?.start()
         }, 1800L)
         networkWatcher = NetworkWatcher(this) { state ->
             runOnUiThread { networkStatus.text = state.summary() }
@@ -428,6 +429,7 @@ class MainActivity : Activity() {
 
     override fun onStart() {
         super.onStart()
+        activityStarted = true
         fistIconAnimation?.start()
         MatrixWireGuardSession.attach(this)
         tunnelUp = isWireGuardActive()
@@ -449,6 +451,7 @@ class MainActivity : Activity() {
     }
 
     override fun onStop() {
+        activityStarted = false
         fistIconAnimation?.stop()
         networkWatcher.stop()
         if (openVpnReceiverRegistered) {
