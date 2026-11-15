@@ -757,7 +757,23 @@ class MainActivity : Activity() {
         Thread {
             try {
                 val catalog = fetchVpnGateCatalog()
-                val servers = catalog.first
+                val rawServers = catalog.first
+                val scoutResults = OpenVpnRouteScout(this).scout(
+                    rawServers.map { RelayProbeTarget("${it.ip}|${it.host}", it.openVpnConfigBase64) }
+                )
+                val scoutById = scoutResults.associateBy { it.id }
+                val servers = rawServers.sortedBy { server ->
+                    when (scoutById["${server.ip}|${server.host}"]?.status) {
+                        RelayProbeStatus.TCP_REACHABLE -> 0
+                        RelayProbeStatus.UDP_OR_UNKNOWN -> 1
+                        RelayProbeStatus.NO_PHYSICAL_NETWORK -> 2
+                        RelayProbeStatus.PROBE_ERROR -> 3
+                        RelayProbeStatus.TCP_UNREACHABLE -> 4
+                        null -> 2
+                    }
+                }
+                val tcpReachable = scoutResults.count { it.status == RelayProbeStatus.TCP_REACHABLE }
+                val tcpTested = scoutResults.count { it.status == RelayProbeStatus.TCP_REACHABLE || it.status == RelayProbeStatus.TCP_UNREACHABLE }
                 runOnUiThread {
                     if (isFinishing || isDestroyed) return@runOnUiThread
                     loading.dismiss()
@@ -766,12 +782,19 @@ class MainActivity : Activity() {
                         status.text = "Список бесплатных VPN-серверов пуст"
                         showError("Серверы не найдены", "Каталог не вернул доступных конфигураций. Попробуйте позже.")
                     } else {
-                        status.text = "Найдено узлов добровольческой сети: " + servers.size + "\nИсточник: " + catalog.second
+                        status.text = "Найдено узлов добровольческой сети: " + servers.size + "\nИсточник: " + catalog.second +
+                            "\nTCP-доступно: $tcpReachable из $tcpTested (предпроверка без OpenVPN handshake)."
                         val labels = servers.map { server ->
                             val pingLabel = if (server.ping >= 0) server.ping.toString() + " мс" else "ping неизвестен"
                             val speedLabel = if (server.speed > 0) " • " + (server.speed / 1_000_000) + " Мбит/с" else ""
+                            val routeLabel = when (scoutById["${server.ip}|${server.host}"]?.status) {
+                                RelayProbeStatus.TCP_REACHABLE -> " • TCP доступен"
+                                RelayProbeStatus.TCP_UNREACHABLE -> " • TCP недоступен"
+                                RelayProbeStatus.UDP_OR_UNKNOWN -> " • UDP/неизвестный транспорт"
+                                else -> " • транспорт не проверен"
+                            }
                             server.country + " • " + server.host + "\nIP: " + server.ip + " • " + pingLabel +
-                                " • сессий: " + server.sessions + speedLabel
+                                " • сессий: " + server.sessions + speedLabel + routeLabel
                         }.toTypedArray()
                         AlertDialog.Builder(this)
                             .setTitle("MATRIX • узлы добровольцев")
