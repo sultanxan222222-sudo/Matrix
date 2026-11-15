@@ -14,7 +14,7 @@ import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.sin
 
-/** Animated Matrix-style globe with a luminous moving node and fading route trail. */
+/** Decorative-only Matrix-style globe; the node and trail never represent real location or VPN routing. */
 class MatrixGlobeView(context: Context) : View(context) {
     private val density = resources.displayMetrics.density
     private val spherePaint = Paint(Paint.ANTI_ALIAS_FLAG)
