@@ -114,7 +114,9 @@ class MainActivity : Activity() {
     private var openVpnReceiverRegistered = false
     private val qualityHandler = Handler(Looper.getMainLooper())
     private var fistIconAnimation: Animatable? = null
+    private var splashFistIconAnimation: Animatable? = null
     private var activityStarted = false
+    private var mainScreenShown = false
     private val qualityTracker = TunnelQualityTracker(failoverFailureThreshold = 3)
     @Volatile private var qualityProbeInProgress = false
     @Volatile private var autoRecoveryInProgress = false
@@ -412,10 +414,28 @@ class MainActivity : Activity() {
                 }
             )
         }
-        setContentView(MatrixRainView(this))
+        val splashIcon = ImageView(this).apply {
+            contentDescription = "MATRIX VPN — кулак пробивает бетонную стену"
+            scaleType = ImageView.ScaleType.FIT_CENTER
+            setImageResource(R.drawable.matrix_fist_loop)
+            layoutParams = FrameLayout.LayoutParams(iconSize, iconSize, Gravity.CENTER)
+            splashFistIconAnimation = drawable as? Animatable
+        }
+        val splashRoot = FrameLayout(this).apply {
+            addView(
+                MatrixRainView(this@MainActivity),
+                FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+            )
+            addView(splashIcon, FrameLayout.LayoutParams(iconSize, iconSize, Gravity.CENTER))
+        }
+        setContentView(splashRoot)
         window.decorView.postDelayed({
-            setContentView(screenRoot)
-            if (activityStarted) fistIconAnimation?.start()
+            if (!isFinishing && !isDestroyed) {
+                mainScreenShown = true
+                setContentView(screenRoot)
+                splashFistIconAnimation?.stop()
+                if (activityStarted) fistIconAnimation?.start()
+            }
         }, 1800L)
         networkWatcher = NetworkWatcher(this) { state ->
             runOnUiThread { networkStatus.text = state.summary() }
@@ -430,7 +450,7 @@ class MainActivity : Activity() {
     override fun onStart() {
         super.onStart()
         activityStarted = true
-        fistIconAnimation?.start()
+        if (mainScreenShown) fistIconAnimation?.start() else splashFistIconAnimation?.start()
         MatrixWireGuardSession.attach(this)
         tunnelUp = isWireGuardActive()
         networkWatcher.start()
@@ -453,6 +473,7 @@ class MainActivity : Activity() {
     override fun onStop() {
         activityStarted = false
         fistIconAnimation?.stop()
+        splashFistIconAnimation?.stop()
         networkWatcher.stop()
         if (openVpnReceiverRegistered) {
             try { unregisterReceiver(openVpnStatusReceiver) } catch (_: Exception) { }
