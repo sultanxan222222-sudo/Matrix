@@ -46,14 +46,41 @@ import org.matrixvpn.recovery.NodeHealthStore
 import org.matrixvpn.recovery.TunnelQuality
 import org.matrixvpn.recovery.TunnelQualityTracker
 import java.io.ByteArrayInputStream
+import java.lang.ref.WeakReference
 
 private const val QUALITY_INTERVAL_MS = 30_000L
 private const val QUALITY_FIRST_PROBE_DELAY_MS = 4_000L
 private const val MAX_CROSS_ENGINE_CANDIDATES = 12
 private const val MAX_VPN_GATE_AUTO_CANDIDATES = 6
 
-private object MatrixWireGuardBackendHolder {
+private object MatrixWireGuardSession {
     @Volatile var backend: GoBackend? = null
+    @Volatile private var activityRef: WeakReference<MainActivity>? = null
+
+    val actions = object : TunnelActionHandler {
+        override fun runPreUp(scripts: MutableCollection<String>) {}
+        override fun runPostUp(scripts: MutableCollection<String>) {}
+        override fun runPreDown(scripts: MutableCollection<String>) {}
+        override fun runPostDown(scripts: MutableCollection<String>) {}
+    }
+
+    // One stable Tunnel identity is required because GoBackend tracks the active tunnel by object identity.
+    val tunnel = object : Tunnel {
+        override fun getName(): String = "matrix"
+        override fun onStateChange(newState: State) {
+            activityRef?.get()?.handleWireGuardStateChange(newState)
+        }
+        override fun isIpv4ResolutionPreferred(): Boolean = true
+        override fun isMetered(): Boolean = false
+    }
+
+    fun attach(activity: MainActivity) {
+        activityRef = WeakReference(activity)
+    }
+
+    fun detach(activity: MainActivity) {
+        if (activityRef?.get() === activity) activityRef = null
+    }
 }
 
 class MainActivity : Activity() {
@@ -64,16 +91,10 @@ class MainActivity : Activity() {
     private lateinit var networkWatcher: NetworkWatcher
     private val pickProfileRequest = 4102
     private val vpnPermissionRequest = 4103
-    private val tunnelActions = object : TunnelActionHandler {
-        override fun runPreUp(scripts: MutableCollection<String>) {}
-        override fun runPostUp(scripts: MutableCollection<String>) {}
-        override fun runPreDown(scripts: MutableCollection<String>) {}
-        override fun runPostDown(scripts: MutableCollection<String>) {}
-    }
     private val wireGuardBackend by lazy {
-        synchronized(MatrixWireGuardBackendHolder) {
-            MatrixWireGuardBackendHolder.backend
-                ?: GoBackend(applicationContext, tunnelActions).also { MatrixWireGuardBackendHolder.backend = it }
+        synchronized(MatrixWireGuardSession) {
+            MatrixWireGuardSession.backend
+                ?: GoBackend(applicationContext, MatrixWireGuardSession.actions).also { MatrixWireGuardSession.backend = it }
         }
     }
     private var wireGuardConfig: Config? = null
@@ -183,37 +204,36 @@ class MainActivity : Activity() {
         }.start()
     }
 
-    private val matrixTunnel = object : Tunnel {
-        override fun getName(): String = "matrix"
-        override fun onStateChange(newState: State) {
-            val wasUp = tunnelUp
-            runOnUiThread {
-                tunnelUp = newState == State.UP
-                status.text = if (tunnelUp) {
-                    "VPN-туннель: подключён\nПрофиль: $activeProfileName\nПроверяется доступ через туннель…"
-                } else {
-                    "VPN-туннель: отключён\nАктивный профиль: $activeProfileName"
-                }
-                refreshModeButtons()
-                if (tunnelUp) {
-                    scheduleQualityMonitor(QUALITY_FIRST_PROBE_DELAY_MS)
-                } else {
-                    qualityTracker.reset()
-                    val userStopped = manualDisconnectInProgress
-                    manualDisconnectInProgress = false
-                    if (wasUp && !userStopped && !wireGuardStartupInProgress &&
-                        !autoRecoveryInProgress && isMatrixLockdownEnabled()) {
-                        startCrossEngineRecovery(activeProfileId, "WireGuard/AmneziaWG остановился во время работы.")
-                    }
+    private val matrixTunnel: Tunnel
+        get() = MatrixWireGuardSession.tunnel
+
+    internal fun handleWireGuardStateChange(newState: State) {
+        val wasUp = tunnelUp
+        runOnUiThread {
+            tunnelUp = newState == State.UP
+            status.text = if (tunnelUp) {
+                "VPN-туннель: подключён\nПрофиль: $activeProfileName\nПроверяется доступ через туннель…"
+            } else {
+                "VPN-туннель: отключён\nАктивный профиль: $activeProfileName"
+            }
+            refreshModeButtons()
+            if (tunnelUp) {
+                scheduleQualityMonitor(QUALITY_FIRST_PROBE_DELAY_MS)
+            } else {
+                qualityTracker.reset()
+                val userStopped = manualDisconnectInProgress
+                manualDisconnectInProgress = false
+                if (wasUp && !userStopped && !wireGuardStartupInProgress &&
+                    !autoRecoveryInProgress && !engineSwitchInProgress && isMatrixLockdownEnabled()) {
+                    startCrossEngineRecovery(activeProfileId, "WireGuard/AmneziaWG остановился во время работы.")
                 }
             }
         }
-        override fun isIpv4ResolutionPreferred(): Boolean = true
-        override fun isMetered(): Boolean = false
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        MatrixWireGuardSession.attach(this)
         val title = TextView(this).apply {
             text = "MATRIX"
             textSize = 36f
@@ -402,6 +422,8 @@ class MainActivity : Activity() {
 
     override fun onStart() {
         super.onStart()
+        MatrixWireGuardSession.attach(this)
+        tunnelUp = isWireGuardActive()
         networkWatcher.start()
         qualityHandler.removeCallbacks(qualityMonitorRunnable)
         qualityHandler.postDelayed(qualityMonitorRunnable, QUALITY_FIRST_PROBE_DELAY_MS)
@@ -430,6 +452,7 @@ class MainActivity : Activity() {
 
     override fun onDestroy() {
         qualityHandler.removeCallbacks(qualityMonitorRunnable)
+        MatrixWireGuardSession.detach(this)
         super.onDestroy()
     }
 
