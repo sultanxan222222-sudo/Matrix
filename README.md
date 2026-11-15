@@ -1,8 +1,8 @@
-# MATRIX VPN — Hybrid 0.8.0
+# MATRIX VPN — Hybrid 0.8.1
 
 MATRIX is an Android VPN client with separate WARP and VPN modes, an encrypted profile pool, AmneziaWG/WireGuard support, an embedded OpenVPN 3 Core engine, relay selection, and guarded recovery between saved VPN profiles.
 
-## Included in 0.8.0
+## Included in 0.8.1
 
 - WARP-compatible profile generation through a third-party community service and connection through AmneziaWG.
 - Import and connection for WireGuard and AmneziaWG profiles.
@@ -10,6 +10,8 @@ MATRIX is an Android VPN client with separate WARP and VPN modes, an encrypted p
 - AES-GCM profile encryption with an Android Keystore key.
 - Public VPN Gate discovery, CSV/profile validation, duplicate filtering, directory ranking, and a bounded TCP endpoint preflight on the physical network.
 - One-tap VPN Gate candidate preparation and sequential connection attempts. If the volunteer queue fails, saved WARP/WireGuard profiles are eligible as fallback candidates.
+- Strict mutual exclusion between the WARP and ordinary VPN modes: before any new connection, MATRIX stops and verifies both embedded engines so only one can own Android's VPN interface.
+- Recovery stays inside the selected mode: WARP can fall back only to saved WARP profiles; ordinary VPN can fall back only to non-WARP profiles. VPN Gate relay recovery never silently changes into WARP.
 - Cross-engine recovery between OpenVPN 3 and WireGuard/AmneziaWG after repeated connection-check failures, only when Android Always-on VPN and Block connections without VPN are confirmed.
 - Periodic HTTPS reachability and latency checks while the MATRIX process remains alive with an active VPN service; three consecutive failed checks are required before automatic recovery.
 - Optional HTTP CONNECT proxy configuration for TCP-capable OpenVPN profiles. MATRIX creates a separate encrypted copy and preserves the original profile.
@@ -34,4 +36,4 @@ Before calling a release production-ready, install on the target phone and test 
 
 ## Build environment
 
-JDK 17, Android SDK 36, Android NDK 27.2, Gradle 8.13. App minSdk 26, targetSdk 35. The generated workflow APK is a debug build for ARM64 devices.
+JDK 17, Android SDK 36, Android NDK 27.2, Gradle 8.13. App minSdk 26, targetSdk 35. The generated workflow APK is a debug build for ARM64 devices. The 0.8.1 build includes exclusive engine handover and persisted WireGuard backend state across Activity recreation.
