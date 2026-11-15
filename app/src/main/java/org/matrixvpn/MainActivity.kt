@@ -73,7 +73,6 @@ class MainActivity : Activity() {
     private var activeProfileName: String = "Нет профиля"
     private var activeProfileProvider: String = "Импорт"
     private var openVpnProfileText: String? = null
-    private var pendingVpnGateAutoQueue: List<VpnGateServer> = emptyList()
     private var pendingOpenVpnStart = false
     private var openVpnRunning = false
     private var openVpnState: String = MatrixVpnService.STATE_DISCONNECTED
@@ -1656,12 +1655,18 @@ class MainActivity : Activity() {
                     } else {
                         openVpnProfileText = null
                         wireGuardConfig = selectedConfig
+                        openVpnState = MatrixVpnService.STATE_DISCONNECTED
+                        openVpnRunning = false
                     }
                     qualityTracker.reset()
                     status.text = "Автоматическое переключение выполнено.\nДвижок: $selectedEngine\nПрофиль: ${chosen.name}\nПроверка внешнего HTTPS успешна."
                     refreshModeButtons()
                     scheduleQualityMonitor(QUALITY_FIRST_PROBE_DELAY_MS)
                 } else {
+                    openVpnState = MatrixVpnService.currentState(this)
+                    openVpnRunning = openVpnState == MatrixVpnService.STATE_CONNECTED ||
+                        openVpnState == MatrixVpnService.STATE_CONNECTING || openVpnState == MatrixVpnService.STATE_DISCONNECTING
+                    tunnelUp = false
                     status.text = "Автоматическое восстановление не нашло работающий профиль.\nПопыток: ${attempts.size}.\nСистемная блокировка Android остаётся включённой: обычный трафик не должен выходить напрямую.\n" +
                         attempts.take(8).joinToString("\n")
                     refreshModeButtons()
