@@ -83,7 +83,13 @@ class MainActivity : Activity() {
     private val qualityMonitorRunnable = object : Runnable {
         override fun run() {
             if (isFinishing || isDestroyed) return
-            if (isVpnSessionConnected()) runQualityProbe()
+            val serviceState = MatrixVpnService.currentState(this@MainActivity)
+            if (openVpnProfileText != null && serviceState == MatrixVpnService.STATE_ERROR &&
+                isMatrixLockdownEnabled() && !autoRecoveryInProgress) {
+                startCrossEngineRecovery(activeProfileId, "OpenVPN остановился с ошибкой в фоновом режиме.")
+            } else if (isVpnSessionConnected()) {
+                runQualityProbe()
+            }
             qualityHandler.postDelayed(this, QUALITY_INTERVAL_MS)
         }
     }
@@ -374,7 +380,6 @@ class MainActivity : Activity() {
     }
 
     override fun onStop() {
-        qualityHandler.removeCallbacks(qualityMonitorRunnable)
         networkWatcher.stop()
         if (openVpnReceiverRegistered) {
             try { unregisterReceiver(openVpnStatusReceiver) } catch (_: Exception) { }
@@ -383,6 +388,11 @@ class MainActivity : Activity() {
         super.onStop()
     }
 
+
+    override fun onDestroy() {
+        qualityHandler.removeCallbacks(qualityMonitorRunnable)
+        super.onDestroy()
+    }
 
     private fun roundedPanel(fill: Int, stroke: Int, radiusDp: Float): GradientDrawable =
         GradientDrawable(GradientDrawable.Orientation.TL_BR, intArrayOf(fill, Color.argb(165, 7, 13, 12))).apply {
