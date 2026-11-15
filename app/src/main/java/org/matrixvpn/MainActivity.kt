@@ -648,8 +648,11 @@ class MainActivity : Activity() {
     }
 
     private fun stopOpenVpnAndWait(timeoutMs: Long = 12_000L): Boolean {
-        if (!isOpenVpnActive()) return true
-        MatrixVpnService.stop(this)
+        val state = MatrixVpnService.currentState(this)
+        val active = openVpnRunning || state == MatrixVpnService.STATE_CONNECTING ||
+            state == MatrixVpnService.STATE_CONNECTED || state == MatrixVpnService.STATE_DISCONNECTING
+        if (!active) return true
+        if (state != MatrixVpnService.STATE_DISCONNECTING) MatrixVpnService.stop(this)
         return waitForOpenVpnStop(timeoutMs)
     }
 
@@ -696,6 +699,11 @@ class MainActivity : Activity() {
                 .setTitle("Учётные данные OpenVPN")
                 .setMessage("Этот профиль требует имя пользователя и пароль. Данные используются только для текущего подключения.")
                 .setView(fields)
+                .setOnCancelListener {
+                    engineSwitchInProgress = false
+                    connectButton.isEnabled = true
+                    warpModeButton.isEnabled = true
+                }
                 .setNegativeButton("Отмена") { _, _ ->
                     engineSwitchInProgress = false
                     connectButton.isEnabled = true
