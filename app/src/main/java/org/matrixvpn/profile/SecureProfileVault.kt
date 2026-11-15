@@ -62,8 +62,16 @@ object SecureProfileVault {
         val root = try { JSONObject(prefs.getString(ITEMS_KEY, "{}") ?: "{}") } catch (_: Exception) { JSONObject() }
         root.put(id, item)
         if (root.length() > MAX_PROFILES) {
-            val oldest = root.keys().asSequence()
+            // Never evict the currently selected profile or the best recent WARP
+            // fallback just because a batch of community relays was added.
+            val activeId = prefs.getString(ACTIVE_KEY, null)
+            val bestWarpId = root.keys().asSequence()
                 .filter { it != id }
+                .filter { root.optJSONObject(it)?.optString("provider")?.equals("WARP", true) == true }
+                .maxByOrNull { root.optJSONObject(it)?.optLong("createdAt") ?: 0L }
+            val protectedIds = setOfNotNull(activeId, bestWarpId)
+            val oldest = root.keys().asSequence()
+                .filter { it != id && it !in protectedIds }
                 .sortedBy { root.optJSONObject(it)?.optLong("createdAt") ?: Long.MAX_VALUE }
                 .take(root.length() - MAX_PROFILES)
                 .toList()

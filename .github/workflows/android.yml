@@ -4,9 +4,9 @@ concurrency:
   cancel-in-progress: true
 on:
   push:
-    branches: [main, 'feature/vaynax-hybrid-free-node-pool', 'feature/openvpn3-embedded-engine']
+    branches: [main, 'feature/vaynax-hybrid-free-node-pool', 'feature/openvpn3-embedded-engine', 'ui/matrix-globe-glass-traffic']
   pull_request:
-    branches: [main]
+    branches: [main, 'feature/openvpn3-embedded-engine']
   workflow_dispatch:
 permissions:
   contents: read

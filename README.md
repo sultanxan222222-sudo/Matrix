@@ -1,42 +1,39 @@
-# MATRIX VPN — Hybrid
+# MATRIX VPN — Hybrid 0.8.1
 
-MATRIX is an Android VPN client with a dedicated WARP profile flow, an encrypted multi-profile pool, WireGuard/AmneziaWG tunnel support, a public OpenVPN catalogue hand-off, and evidence-based profile selection.
+MATRIX is an Android VPN client with separate WARP and VPN modes, an encrypted profile pool, AmneziaWG/WireGuard support, an embedded OpenVPN 3 Core engine, relay selection, and guarded recovery between saved VPN profiles.
 
-## Implemented in 0.6.0
+## Included in 0.8.1
 
-- Dedicated WARP — separate mode entry restored in the main screen. It obtains a WARP-compatible WireGuard/AWG profile from a third-party community generator. This is not an official Cloudflare API or a Cloudflare-supported custom client.
-- Multiple WireGuard/AmneziaWG profiles can be saved, selected, and deleted. Each configuration is encrypted with AES-GCM using a key held in Android Keystore; metadata is stored separately.
-- Existing 0.5.x single-profile storage is migrated into the encrypted profile pool on first launch.
-- Per-profile history records successful/failed HTTPS connectivity checks and a smoothed response-time estimate. The pool UI ranks profiles using local observations; unknown profiles are clearly marked untested.
-- Guarded fallback attempts saved WireGuard/AmneziaWG profiles only when Android confirms MATRIX is configured as Always-on VPN with Block connections without VPN (lockdown). WARP mode is excluded from cross-provider fallback so it remains separate.
-- VPN Gate directory discovery is retained. VPN Gate publishes OpenVPN profiles; MATRIX shares them with a compatible external OpenVPN app. The embedded MATRIX tunnel backend does not natively connect OpenVPN profiles.
-- Manual import from Android file picker or clipboard remains available.
-- User permission is required before starting a tunnel; MATRIX does not auto-connect on app launch.
+- WARP-compatible profile generation through a third-party community service and connection through AmneziaWG.
+- Import and connection for WireGuard and AmneziaWG profiles.
+- Embedded OpenVPN 3 Core through a Rust/JNI bridge and Android VpnService; VPN Gate profiles connect inside MATRIX rather than launching another VPN app.
+- AES-GCM profile encryption with an Android Keystore key.
+- Public VPN Gate discovery, CSV/profile validation, duplicate filtering, directory ranking, and a bounded TCP endpoint preflight on the physical network.
+- One-tap VPN Gate candidate preparation and sequential connection attempts. If the volunteer queue fails, saved WARP/WireGuard profiles are eligible as fallback candidates.
+- Strict mutual exclusion between the WARP and ordinary VPN modes: before any new connection, MATRIX stops and verifies both embedded engines so only one can own Android's VPN interface.
+- Recovery stays inside the selected mode: WARP can fall back only to saved WARP profiles; ordinary VPN can fall back only to non-WARP profiles. VPN Gate relay recovery never silently changes into WARP.
+- Cross-engine recovery between OpenVPN 3 and WireGuard/AmneziaWG after repeated connection-check failures, only when Android Always-on VPN and Block connections without VPN are confirmed.
+- Periodic HTTPS reachability and latency checks while the MATRIX process remains alive with an active VPN service; three consecutive failed checks are required before automatic recovery.
+- Optional HTTP CONNECT proxy configuration for TCP-capable OpenVPN profiles. MATRIX creates a separate encrypted copy and preserves the original profile.
+- Compact translucent glass controls, a decorative rotating Matrix globe, and a gold RX/TX display based on MATRIX app-UID traffic counters.
 
-## Important limits
+## Transport and security boundaries
 
-- WARP profiles are obtained from a third-party generator. Download or parsing does not prove a real Cloudflare WARP tunnel is reachable.
-- HTTPS reachability through a tunnel is a practical signal, not a cryptographic WireGuard peer-handshake measurement or proof of anonymity.
-- Automatic fallback is sequential recovery after a failed initial HTTPS probe, not seamless multipath. It is gated by Android lockdown to reduce leak risk.
-- VPN Gate nodes are volunteer-operated and may be slow, unstable, or untrusted. OpenVPN files are handed to a separate OpenVPN client.
-- A trustworthy public WireGuard directory cannot be assumed to provide valid credentials or safe endpoints. MATRIX does not invent node keys or publish third-party private keys.
-- Real-device verification remains required for generated WARP profiles, DNS/IPv6 leak behavior, Android lockdown interaction, and network handover.
-
-## Architecture
-
-- Tunnel engine: AmneziaWG Android backend, intended for standard WireGuard and AWG profiles.
-- Profile vault: AES-GCM encrypted per-profile storage backed by Android Keystore.
-- WARP flow: isolated profile acquisition and selection; user-controlled connect.
-- Free-node directory: VPN Gate OpenVPN catalogue with explicit external-client hand-off.
-- Health and selection: locally observed success/failure plus smoothed HTTPS response time.
-- Recovery: ordered fallback only under Android Always-on VPN + lockdown.
-- Network watcher and Cloudflare trace probe provide diagnostics; neither alone proves peer identity.
+- OpenVPN profiles can use their configured TCP or UDP transport. The optional HTTP CONNECT proxy is for TCP profiles only, requires a user-provided trusted proxy, and does not itself provide obfs4, Snowflake, WebTunnel, or guaranteed DPI evasion. Those transports require compatible remote server infrastructure and are not claimed by this client.
+- WARP profiles come from a third-party generator, not an official Cloudflare client/API. Creating a profile does not prove a successful WARP handshake.
+- VPN Gate nodes are independent volunteer-operated computers. Their operators are not MATRIX; treat them as untrusted exits and do not use them for sensitive activity.
+- The globe animation is decorative only. It does not display the user's location, network geography, or a live VPN route.
+- RX/TX values are Android traffic counters for the MATRIX app UID. They are not whole-device rates and are not a verified VPN tunnel throughput measurement.
+- HTTPS reachability is a practical connectivity signal, not a cryptographic peer-handshake measurement or proof of anonymity.
+- Automatic tunnel switching is sequential, not seamless multipath. It is disabled unless Android lockdown is confirmed, to avoid intentionally falling back to an unprotected direct route.
+- Android background execution and Doze can still affect timing. The monitor runs while the app process is retained by the active VPN service, but this is not a guarantee against OS process termination or OEM battery policies.
 
 ## Build and validation
 
-CI runs gradle testDebugUnitTest assembleDebug with JDK 17 and Android SDK 36. The debug APK is uploaded as matrix-vpn-debug-apk artifact for 14 days. CI success confirms compilation and unit tests, not real-device VPN operation.
+CI builds the ARM64 OpenVPN 3 native library, runs JVM unit tests, assembles the debug APK, verifies the native library is packaged, and uploads the APK and source bundle. This is build validation, not a substitute for a physical-device acceptance run.
 
-Target initial validation device: Realme Note 50, Android 15. Android 13–16 remain compatibility targets until tested.
+Before calling a release production-ready, install on the target phone and test both engines, Android VPN consent, screen-off/background monitoring, reconnects, mode switching, DNS and IPv6 leak behavior, lockdown, captive portals, Wi-Fi/mobile handover, and long-duration stability. The current CI cannot certify those device-specific behaviors.
 
+## Build environment
 
-<!-- Native OpenVPN bridge compile fix verified; rebuild trigger. -->
+JDK 17, Android SDK 36, Android NDK 27.2, Gradle 8.13. App minSdk 26, targetSdk 35. The generated workflow APK is a debug build for ARM64 devices. The 0.8.1 build includes exclusive engine handover and persisted WireGuard backend state across Activity recreation.

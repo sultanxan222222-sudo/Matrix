@@ -62,8 +62,17 @@ class MatrixVpnService : VpnService() {
     private fun stopOpenVpn() {
         try {
             publishState(STATE_DISCONNECTING, "Останавливается OpenVPN…")
-            if (isNativeLoaded()) nativeStop()
-            updateNotification("Отключение VPN…")
+            if (isNativeLoaded()) {
+                nativeStop()
+                updateNotification("Отключение VPN…")
+            } else {
+                // The Activity can be recreated while the persisted state still says CONNECTED.
+                // If this service has no native session in this process, clear the stale state
+                // instead of leaving the app permanently stuck in DISCONNECTING.
+                publishState(STATE_DISCONNECTED, "OpenVPN-сеанс уже остановлен.")
+                stopForeground(STOP_FOREGROUND_REMOVE)
+                stopSelf()
+            }
         } catch (error: Throwable) {
             publishState(STATE_ERROR, error.message ?: "Не удалось остановить OpenVPN.")
             stopForeground(STOP_FOREGROUND_REMOVE)
