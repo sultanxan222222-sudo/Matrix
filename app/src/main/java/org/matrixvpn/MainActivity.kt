@@ -9,6 +9,7 @@ import android.content.Context
 import android.content.IntentFilter
 import android.content.res.ColorStateList
 import android.graphics.Color
+import android.graphics.drawable.Animatable
 import android.graphics.drawable.GradientDrawable
 import android.net.VpnService
 import android.net.Uri
@@ -22,6 +23,7 @@ import android.view.Gravity
 import android.view.ViewGroup
 import android.widget.Button
 import android.widget.FrameLayout
+import android.widget.ImageView
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ScrollView
@@ -111,6 +113,7 @@ class MainActivity : Activity() {
     private var openVpnState: String = MatrixVpnService.STATE_DISCONNECTED
     private var openVpnReceiverRegistered = false
     private val qualityHandler = Handler(Looper.getMainLooper())
+    private var fistIconAnimation: Animatable? = null
     private val qualityTracker = TunnelQualityTracker(failoverFailureThreshold = 3)
     @Volatile private var qualityProbeInProgress = false
     @Volatile private var autoRecoveryInProgress = false
@@ -239,15 +242,13 @@ class MainActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         MatrixWireGuardSession.attach(this)
-        val title = TextView(this).apply {
-            text = "MATRIX"
-            textSize = 36f
-            letterSpacing = 0.16f
-            typeface = android.graphics.Typeface.create("sans-serif-light", android.graphics.Typeface.NORMAL)
-            setTextColor(Color.rgb(111, 255, 180))
-            gravity = Gravity.CENTER
-            setShadowLayer(18f, 0f, 0f, Color.rgb(0, 220, 150))
-            setPadding(8, 24, 8, 4)
+        val iconSize = (108f * resources.displayMetrics.density).toInt()
+        val title = ImageView(this).apply {
+            contentDescription = "MATRIX VPN — кулак пробивает бетонную стену"
+            scaleType = ImageView.ScaleType.FIT_CENTER
+            setImageResource(R.drawable.matrix_fist_loop)
+            layoutParams = LinearLayout.LayoutParams(iconSize, iconSize)
+            fistIconAnimation = drawable as? Animatable
         }
         val menuSubtitle = TextView(this).apply {
             text = "PRIVATE NETWORK  /  0.8.1"
@@ -397,7 +398,6 @@ class MainActivity : Activity() {
         styleGlassModeButton(connectButton, false)
         help.setTextColor(Color.rgb(165, 198, 184))
         help.textSize = 12f
-        title.setShadowLayer(22f, 0f, 0f, Color.rgb(40, 255, 170))
         val density = resources.displayMetrics.density
         val screenRoot = FrameLayout(this).apply {
             setBackgroundColor(Color.rgb(2, 9, 8))
@@ -414,6 +414,7 @@ class MainActivity : Activity() {
         setContentView(MatrixRainView(this))
         window.decorView.postDelayed({
             setContentView(screenRoot)
+            fistIconAnimation?.start()
         }, 1800L)
         networkWatcher = NetworkWatcher(this) { state ->
             runOnUiThread { networkStatus.text = state.summary() }
@@ -427,6 +428,7 @@ class MainActivity : Activity() {
 
     override fun onStart() {
         super.onStart()
+        fistIconAnimation?.start()
         MatrixWireGuardSession.attach(this)
         tunnelUp = isWireGuardActive()
         networkWatcher.start()
@@ -447,6 +449,7 @@ class MainActivity : Activity() {
     }
 
     override fun onStop() {
+        fistIconAnimation?.stop()
         networkWatcher.stop()
         if (openVpnReceiverRegistered) {
             try { unregisterReceiver(openVpnStatusReceiver) } catch (_: Exception) { }
