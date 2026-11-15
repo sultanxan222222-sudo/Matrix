@@ -1407,48 +1407,60 @@ class MainActivity : Activity() {
      * under Android lockdown. After the volunteer relay queue is exhausted,
      * previously saved WARP/WireGuard profiles remain eligible as a fallback.
      */
+
     private fun prepareVpnGateAutoQueue(servers: List<VpnGateServer>) {
         if (!isMatrixLockdownEnabled()) {
             showRecoveryStatus()
             return
         }
         val previousActiveId = SecureProfileVault.activeId(this)
-        val savedProfiles = mutableListOf<org.matrixvpn.profile.SavedVpnProfile>()
-        val failures = mutableListOf<String>()
-        for (server in servers.take(MAX_VPN_GATE_AUTO_CANDIDATES)) {
-            try {
-                val decoded = android.util.Base64.decode(server.openVpnConfigBase64, android.util.Base64.DEFAULT)
-                val profile = String(decoded, Charsets.UTF_8)
-                require(VpnProfileInspector.inspect(profile).format == ImportedVpnProfile.Format.OPENVPN) {
-                    "Каталог вернул некорректный OpenVPN-профиль."
+        connectButton.isEnabled = false
+        status.text = "Подготавливаю профили узлов VPN Gate для последовательной проверки…"
+        Thread {
+            val savedProfiles = mutableListOf<org.matrixvpn.profile.SavedVpnProfile>()
+            val failures = mutableListOf<String>()
+            for (server in servers.take(MAX_VPN_GATE_AUTO_CANDIDATES)) {
+                try {
+                    val decoded = android.util.Base64.decode(server.openVpnConfigBase64, android.util.Base64.DEFAULT)
+                    val profile = String(decoded, Charsets.UTF_8)
+                    require(VpnProfileInspector.inspect(profile).format == ImportedVpnProfile.Format.OPENVPN) {
+                        "Каталог вернул некорректный OpenVPN-профиль."
+                    }
+                    val saved = SecureProfileVault.save(
+                        this,
+                        "MATRIX Auto • ${server.country} • ${server.host}",
+                        "VPN Gate",
+                        profile
+                    )
+                    savedProfiles.add(saved)
+                    // SecureProfileVault.save selects every newly added profile.
+                    // Restore the original active ID after each save so vault trimming
+                    // does not evict the user's current profile during a batch.
+                    SecureProfileVault.setActive(this, previousActiveId)
+                } catch (error: Exception) {
+                    failures.add("${server.host}: ${error.message ?: "ошибка профиля"}")
                 }
-                val saved = SecureProfileVault.save(
-                    this,
-                    "MATRIX Auto • ${server.country} • ${server.host}",
-                    "VPN Gate",
-                    profile
-                )
-                savedProfiles.add(saved)
-                SecureProfileVault.setActive(this, previousActiveId)
-            } catch (error: Exception) {
-                failures.add("${server.host}: ${error.message ?: "ошибка профиля"}")
             }
-        }
-        SecureProfileVault.setActive(this, previousActiveId)
-        if (savedProfiles.isEmpty()) {
-            showError("Автоподбор не подготовлен", failures.take(5).joinToString("\n").ifBlank {
-                "Не удалось сохранить ни одного подходящего узла."
-            })
-            return
-        }
-        startCrossEngineRecovery(
-            previousActiveId,
-            "Автоподбор: проверяю ${savedProfiles.size} узлов VPN Gate; после них доступны сохранённые резервные WARP/WireGuard-профили.",
-            savedProfiles.map { it.id }
-        )
-        if (failures.isNotEmpty()) {
-            networkStatus.text = "Подготовлено ${savedProfiles.size} узлов; пропущено ${failures.size} некорректных профилей."
-        }
+            SecureProfileVault.setActive(this, previousActiveId)
+            runOnUiThread {
+                connectButton.isEnabled = true
+                if (isFinishing || isDestroyed) return@runOnUiThread
+                if (savedProfiles.isEmpty()) {
+                    showError("Автоподбор не подготовлен", failures.take(5).joinToString("\n").ifBlank {
+                        "Не удалось сохранить ни одного подходящего узла."
+                    })
+                    return@runOnUiThread
+                }
+                startCrossEngineRecovery(
+                    previousActiveId,
+                    "Автоподбор: проверяю ${savedProfiles.size} узлов VPN Gate; после них доступны сохранённые резервные WARP/WireGuard-профили.",
+                    savedProfiles.map { it.id }
+                )
+                if (failures.isNotEmpty()) {
+                    networkStatus.text = "Подготовлено ${savedProfiles.size} узлов; пропущено ${failures.size} некорректных профилей."
+                }
+            }
+        }.start()
     }
 
     private fun isVpnSessionConnected(): Boolean =
@@ -1504,7 +1516,7 @@ class MainActivity : Activity() {
         reason: String,
         preferredProfileIds: List<String> = emptyList()
     ) {
-        if (autoRecoveryInProgress) return
+        if (autoRecoveryInProgress || pendingRecoveryReason != null) return
         if (!isMatrixLockdownEnabled()) {
             status.text = "$reason\nАвтоматический переход заблокирован: включите Android Always-on VPN и блокировку подключений без VPN."
             return
@@ -1843,6 +1855,7 @@ class MainActivity : Activity() {
                 pendingRecoveryExcludedId = null
                 pendingRecoveryPreferredIds = emptyList()
                 showError("Разрешение VPN не предоставлено", "Android не разрешил приложению MATRIX создать VPN-туннель.")
+                scheduleQualityMonitor(QUALITY_FIRST_PROBE_DELAY_MS)
             }
             return
         }
