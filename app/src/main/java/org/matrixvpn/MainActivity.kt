@@ -52,6 +52,10 @@ private const val QUALITY_FIRST_PROBE_DELAY_MS = 4_000L
 private const val MAX_CROSS_ENGINE_CANDIDATES = 12
 private const val MAX_VPN_GATE_AUTO_CANDIDATES = 6
 
+private object MatrixWireGuardBackendHolder {
+    @Volatile var backend: GoBackend? = null
+}
+
 class MainActivity : Activity() {
     private lateinit var status: TextView
     private lateinit var networkStatus: TextView
@@ -66,7 +70,12 @@ class MainActivity : Activity() {
         override fun runPreDown(scripts: MutableCollection<String>) {}
         override fun runPostDown(scripts: MutableCollection<String>) {}
     }
-    private val wireGuardBackend by lazy { GoBackend(applicationContext, tunnelActions) }
+    private val wireGuardBackend by lazy {
+        synchronized(MatrixWireGuardBackendHolder) {
+            MatrixWireGuardBackendHolder.backend
+                ?: GoBackend(applicationContext, tunnelActions).also { MatrixWireGuardBackendHolder.backend = it }
+        }
+    }
     private var wireGuardConfig: Config? = null
     @Volatile private var tunnelUp = false
     private var activeProfileId: String? = null
@@ -86,6 +95,7 @@ class MainActivity : Activity() {
     @Volatile private var autoRecoveryInProgress = false
     @Volatile private var manualDisconnectInProgress = false
     @Volatile private var wireGuardStartupInProgress = false
+    @Volatile private var engineSwitchInProgress = false
     private val qualityMonitorRunnable = object : Runnable {
         override fun run() {
             if (isFinishing || isDestroyed) return
@@ -452,8 +462,11 @@ class MainActivity : Activity() {
 
     private fun refreshModeButtons() {
         if (!::warpModeButton.isInitialized || !::connectButton.isInitialized) return
-        val warpActive = tunnelUp && activeProfileProvider.equals("WARP", true)
-        val vpnActive = openVpnRunning || (tunnelUp && !activeProfileProvider.equals("WARP", true))
+        val openVpnActive = isOpenVpnActive()
+        val wireGuardActive = isWireGuardActive()
+        // A single active engine owns the Android VPN slot. Never paint both modes as active.
+        val warpActive = !openVpnActive && wireGuardActive && activeProfileProvider.equals("WARP", true)
+        val vpnActive = openVpnActive || (wireGuardActive && !activeProfileProvider.equals("WARP", true))
         styleGlassModeButton(warpModeButton, warpActive)
         styleGlassModeButton(connectButton, vpnActive)
         listOf(warpModeButton, connectButton).forEach { button ->
@@ -472,11 +485,12 @@ class MainActivity : Activity() {
     }
 
         private fun onWarpModeClick() {
-        if (openVpnRunning) {
+        if (engineSwitchInProgress || wireGuardStartupInProgress || autoRecoveryInProgress) return
+        if (isOpenVpnActive()) {
             showError("VPN уже активен", "Сначала отключите OpenVPN 3, затем включите WARP.")
             return
         }
-        if (tunnelUp) {
+        if (isWireGuardActive()) {
             if (activeProfileProvider.equals("WARP", true)) connectOrDisconnect()
             else showError("VPN уже активен", "Сначала отключите текущий VPN, затем включите WARP.")
             return
@@ -486,11 +500,12 @@ class MainActivity : Activity() {
     }
 
         private fun onVpnModeClick() {
-        if (openVpnRunning) {
+        if (engineSwitchInProgress || wireGuardStartupInProgress || autoRecoveryInProgress) return
+        if (isOpenVpnActive()) {
             MatrixVpnService.stop(this)
             return
         }
-        if (tunnelUp) {
+        if (isWireGuardActive()) {
             if (!activeProfileProvider.equals("WARP", true)) connectOrDisconnect()
             else showError("WARP уже активен", "Сначала отключите WARP, затем включите VPN.")
             return
@@ -548,9 +563,70 @@ class MainActivity : Activity() {
             .show()
     }
 
+    private fun isOpenVpnActive(): Boolean {
+        val state = MatrixVpnService.currentState(this)
+        return openVpnRunning || state == MatrixVpnService.STATE_CONNECTING ||
+            state == MatrixVpnService.STATE_CONNECTED || state == MatrixVpnService.STATE_DISCONNECTING
+    }
+
+    private fun isWireGuardActive(): Boolean = try {
+        tunnelUp || wireGuardBackend.getState(matrixTunnel) == State.UP
+    } catch (_: Exception) {
+        tunnelUp
+    }
+
+    /** Stop and verify both engines before starting either one. Android has one VPN slot per user. */
     private fun startSelectedVpnTunnel() {
+        if (engineSwitchInProgress || autoRecoveryInProgress) return
+        engineSwitchInProgress = true
         manualDisconnectInProgress = false
-        if (openVpnProfileText != null) startEmbeddedOpenVpnTunnel() else startWireGuardTunnel()
+        connectButton.isEnabled = false
+        warpModeButton.isEnabled = false
+        status.text = "Подготавливаю выбранный режим…\nОтключаю предыдущий VPN-движок."
+
+        Thread {
+            val openVpnStopped = stopOpenVpnAndWait(12_000L)
+            val wireGuardStopped = openVpnStopped && stopWireGuardAndWait(5_000L)
+            runOnUiThread {
+                engineSwitchInProgress = false
+                warpModeButton.isEnabled = true
+                connectButton.isEnabled = true
+                openVpnState = MatrixVpnService.currentState(this)
+                openVpnRunning = isOpenVpnActive()
+                if (!openVpnStopped || !wireGuardStopped || isWireGuardActive() || isOpenVpnActive()) {
+                    refreshModeButtons()
+                    showError(
+                        "Не удалось освободить VPN-подключение",
+                        "Предыдущий VPN-движок не подтвердил отключение. Новый режим не запущен, чтобы два туннеля не конфликтовали. Отключите активный VPN и повторите попытку."
+                    )
+                    return@runOnUiThread
+                }
+                qualityTracker.reset()
+                if (openVpnProfileText != null) startEmbeddedOpenVpnTunnel() else startWireGuardTunnel()
+            }
+        }.start()
+    }
+
+    private fun stopOpenVpnAndWait(timeoutMs: Long = 12_000L): Boolean {
+        if (!isOpenVpnActive()) return true
+        MatrixVpnService.stop(this)
+        return waitForOpenVpnStop(timeoutMs)
+    }
+
+    private fun stopWireGuardAndWait(timeoutMs: Long = 5_000L): Boolean {
+        return try {
+            if (isWireGuardActive()) {
+                wireGuardBackend.setState(matrixTunnel, State.DOWN, null)
+            }
+            val deadline = SystemClock.elapsedRealtime() + timeoutMs
+            while (SystemClock.elapsedRealtime() < deadline) {
+                if (!isWireGuardActive()) return true
+                Thread.sleep(50L)
+            }
+            !isWireGuardActive()
+        } catch (_: Exception) {
+            false
+        }
     }
 
     private fun startEmbeddedOpenVpnTunnel() {
@@ -577,7 +653,11 @@ class MainActivity : Activity() {
                 .setTitle("Учётные данные OpenVPN")
                 .setMessage("Этот профиль требует имя пользователя и пароль. Данные используются только для текущего подключения.")
                 .setView(fields)
-                .setNegativeButton("Отмена", null)
+                .setNegativeButton("Отмена") { _, _ ->
+                    engineSwitchInProgress = false
+                    connectButton.isEnabled = true
+                    warpModeButton.isEnabled = true
+                }
                 .setPositiveButton("Подключить") { _, _ ->
                     launchEmbeddedOpenVpn(profile, username.text.toString(), password.text.toString())
                 }
@@ -597,9 +677,13 @@ class MainActivity : Activity() {
             MatrixVpnService.start(this, profile, username, password)
             openVpnRunning = true
             openVpnState = MatrixVpnService.STATE_CONNECTING
+            engineSwitchInProgress = false
+            warpModeButton.isEnabled = true
             refreshModeButtons()
         } catch (error: Exception) {
+            engineSwitchInProgress = false
             connectButton.isEnabled = true
+            warpModeButton.isEnabled = true
             showError("Не удалось запустить OpenVPN 3", error.message ?: "Android не смог запустить VPN-службу.")
         }
     }
@@ -1301,12 +1385,13 @@ class MainActivity : Activity() {
     }
 
     private fun connectOrDisconnect() {
-        if (openVpnRunning) {
+        if (engineSwitchInProgress || autoRecoveryInProgress) return
+        if (isOpenVpnActive()) {
             manualDisconnectInProgress = true
             MatrixVpnService.stop(this)
             return
         }
-        if (tunnelUp) {
+        if (isWireGuardActive()) {
             manualDisconnectInProgress = true
             connectButton.isEnabled = false
             Thread {
@@ -1327,23 +1412,22 @@ class MainActivity : Activity() {
             }.start()
             return
         }
-        if (openVpnProfileText != null) {
-            val permission = VpnService.prepare(this)
-            if (permission != null) startActivityForResult(permission, vpnPermissionRequest)
-            else startEmbeddedOpenVpnTunnel()
-            return
-        }
-        if (wireGuardConfig == null) {
+        if (openVpnProfileText == null && wireGuardConfig == null) {
             showError("Нет профиля VPN", "Сначала импортируйте OpenVPN, WireGuard или AmneziaWG .conf.")
             return
         }
         val prepareIntent = VpnService.prepare(this)
         if (prepareIntent != null) startActivityForResult(prepareIntent, vpnPermissionRequest)
-        else startWireGuardTunnel()
+        else startSelectedVpnTunnel()
     }
 
     private fun startWireGuardTunnel() {
-        val config = wireGuardConfig ?: return
+        val config = wireGuardConfig ?: run {
+            engineSwitchInProgress = false
+            warpModeButton.isEnabled = true
+            connectButton.isEnabled = true
+            return
+        }
         manualDisconnectInProgress = false
         wireGuardStartupInProgress = true
         val startingProfileId = activeProfileId
@@ -1414,6 +1498,8 @@ class MainActivity : Activity() {
             }
             runOnUiThread {
                 wireGuardStartupInProgress = false
+                engineSwitchInProgress = false
+                warpModeButton.isEnabled = true
                 status.text = finalText
                 connectButton.isEnabled = true
                 connectButton.text = if (connected && tunnelUp) "Отключить VPN" else "Подключить VPN"
@@ -1561,8 +1647,11 @@ class MainActivity : Activity() {
         status.text = "$reason\nЗапускаю безопасное переключение между VPN-движками…"
 
         val preferredOrder = preferredProfileIds.withIndex().associate { it.value to it.index }
+        // WARP and the ordinary VPN mode are separate products in the UI; recovery must never cross between them.
+        // A VPN Gate queue is always ordinary VPN, even if the previously selected profile happened to be WARP.
+        val recoveryIsWarp = preferredProfileIds.isEmpty() && activeProfileProvider.equals("WARP", true)
         val candidates = SecureProfileVault.list(this)
-            .filter { it.id != excludedProfileId }
+            .filter { it.id != excludedProfileId && it.provider.equals("WARP", true) == recoveryIsWarp }
             .sortedWith(
                 compareBy<org.matrixvpn.profile.SavedVpnProfile> { preferredOrder[it.id] ?: Int.MAX_VALUE }
                     .thenByDescending { NodeHealthStore.score(this, it.id) }
@@ -1577,24 +1666,8 @@ class MainActivity : Activity() {
             var selectedEngine = ""
             val attempts = mutableListOf<String>()
 
-            fun stopOpenVpnAndWait(): Boolean {
-                val current = MatrixVpnService.currentState(this)
-                if (current == MatrixVpnService.STATE_DISCONNECTED || current == MatrixVpnService.STATE_ERROR) return true
-                MatrixVpnService.stop(this)
-                return waitForOpenVpnStop(12_000L)
-            }
-
-            fun stopWireGuardAndWait(): Boolean {
-                if (!tunnelUp) return true
-                return try {
-                    wireGuardBackend.setState(matrixTunnel, State.DOWN, null)
-                    val deadline = SystemClock.elapsedRealtime() + 3_000L
-                    while (tunnelUp && SystemClock.elapsedRealtime() < deadline) Thread.sleep(50L)
-                    !tunnelUp
-                } catch (_: Exception) {
-                    false
-                }
-            }
+            fun stopOpenVpnAndWait(): Boolean = this@MainActivity.stopOpenVpnAndWait(12_000L)
+            fun stopWireGuardAndWait(): Boolean = this@MainActivity.stopWireGuardAndWait(5_000L)
 
             try {
                 if (!stopOpenVpnAndWait()) {
