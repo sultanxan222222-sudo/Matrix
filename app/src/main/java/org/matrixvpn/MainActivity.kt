@@ -49,6 +49,7 @@ import java.io.ByteArrayInputStream
 
 private const val QUALITY_INTERVAL_MS = 30_000L
 private const val QUALITY_FIRST_PROBE_DELAY_MS = 4_000L
+private const val MAX_CROSS_ENGINE_CANDIDATES = 8
 
 class MainActivity : Activity() {
     private lateinit var status: TextView
@@ -66,7 +67,7 @@ class MainActivity : Activity() {
     }
     private val wireGuardBackend by lazy { GoBackend(applicationContext, tunnelActions) }
     private var wireGuardConfig: Config? = null
-    private var tunnelUp = false
+    @Volatile private var tunnelUp = false
     private var activeProfileId: String? = null
     private var activeProfileName: String = "Нет профиля"
     private var activeProfileProvider: String = "Импорт"
@@ -1453,6 +1454,7 @@ class MainActivity : Activity() {
             .filter { it.id != excludedProfileId }
             .sortedWith(compareByDescending<org.matrixvpn.profile.SavedVpnProfile> { NodeHealthStore.score(this, it.id) }
                 .thenByDescending { it.createdAt })
+            .take(MAX_CROSS_ENGINE_CANDIDATES)
 
         Thread {
             var selectedProfile: org.matrixvpn.profile.SavedVpnProfile? = null
@@ -1461,28 +1463,34 @@ class MainActivity : Activity() {
             var selectedEngine = ""
             val attempts = mutableListOf<String>()
 
-            fun stopOpenVpnAndWait() {
+            fun stopOpenVpnAndWait(): Boolean {
                 val current = MatrixVpnService.currentState(this)
-                if (current == MatrixVpnService.STATE_CONNECTED ||
-                    current == MatrixVpnService.STATE_CONNECTING ||
-                    current == MatrixVpnService.STATE_DISCONNECTING) {
-                    MatrixVpnService.stop(this)
-                    waitForOpenVpnStop(12_000L)
+                if (current == MatrixVpnService.STATE_DISCONNECTED || current == MatrixVpnService.STATE_ERROR) return true
+                MatrixVpnService.stop(this)
+                return waitForOpenVpnStop(12_000L)
+            }
+
+            fun stopWireGuardAndWait(): Boolean {
+                if (!tunnelUp) return true
+                return try {
+                    wireGuardBackend.setState(matrixTunnel, State.DOWN, null)
+                    val deadline = SystemClock.elapsedRealtime() + 3_000L
+                    while (tunnelUp && SystemClock.elapsedRealtime() < deadline) Thread.sleep(50L)
+                    !tunnelUp
+                } catch (_: Exception) {
+                    false
                 }
             }
 
-            fun stopWireGuard() {
-                try {
-                    wireGuardBackend.setState(matrixTunnel, State.DOWN, null)
-                    Thread.sleep(500L)
-                } catch (_: Exception) { }
-            }
-
             try {
-                stopOpenVpnAndWait()
-                if (tunnelUp) stopWireGuard()
+                if (!stopOpenVpnAndWait()) {
+                    attempts.add("OpenVPN не подтвердил отключение; переключение остановлено для безопасности.")
+                } else if (!stopWireGuardAndWait()) {
+                    attempts.add("WireGuard/AmneziaWG не подтвердил отключение; переключение остановлено для безопасности.")
+                }
 
                 for (candidate in candidates) {
+                    if (attempts.any { it.contains("переключение остановлено") }) break
                     if (selectedProfile != null) break
                     try {
                         val raw = SecureProfileVault.load(this, candidate.id) ?: continue
@@ -1503,8 +1511,9 @@ class MainActivity : Activity() {
                                     selectedRaw = raw
                                     selectedConfig = config
                                     selectedEngine = "WireGuard/AmneziaWG"
-                                } else {
-                                    stopWireGuard()
+                                } else if (!stopWireGuardAndWait()) {
+                                    attempts.add("Туннель WireGuard не подтвердил остановку; перебор прерван.")
+                                    break
                                 }
                             }
                             ImportedVpnProfile.Format.OPENVPN -> {
@@ -1534,14 +1543,21 @@ class MainActivity : Activity() {
                                 } else {
                                     attempts.add("${candidate.name} • OpenVPN 3 не подключился")
                                 }
-                                if (selectedProfile == null) stopOpenVpnAndWait()
+                                if (selectedProfile == null && !stopOpenVpnAndWait()) {
+                                    attempts.add("OpenVPN не подтвердил отключение; дальнейший перебор остановлен.")
+                                    break
+                                }
                             }
                             else -> attempts.add("${candidate.name} • неподдерживаемый формат")
                         }
                     } catch (error: Exception) {
                         attempts.add("${candidate.name} • ошибка: ${error.message ?: error.javaClass.simpleName}")
-                        stopOpenVpnAndWait()
-                        stopWireGuard()
+                        val openVpnStopped = stopOpenVpnAndWait()
+                        val wireGuardStopped = stopWireGuardAndWait()
+                        if (!openVpnStopped || !wireGuardStopped) {
+                            attempts.add("Активный VPN-движок не подтвердил остановку; дальнейшее переключение прекращено.")
+                            break
+                        }
                     }
                 }
             } catch (error: Exception) {
@@ -1549,6 +1565,10 @@ class MainActivity : Activity() {
             }
 
             val recovered = selectedProfile != null
+            if (!recovered) {
+                stopOpenVpnAndWait()
+                stopWireGuardAndWait()
+            }
             runOnUiThread {
                 autoRecoveryInProgress = false
                 connectButton.isEnabled = true
@@ -1572,8 +1592,6 @@ class MainActivity : Activity() {
                     refreshModeButtons()
                     scheduleQualityMonitor(QUALITY_FIRST_PROBE_DELAY_MS)
                 } else {
-                    stopOpenVpnAndWait()
-                    stopWireGuard()
                     status.text = "Автоматическое восстановление не нашло работающий профиль.\nПопыток: ${attempts.size}.\nСистемная блокировка Android остаётся включённой: обычный трафик не должен выходить напрямую.\n" +
                         attempts.take(8).joinToString("\n")
                     refreshModeButtons()
