@@ -164,10 +164,15 @@ class MainActivity : Activity() {
                 }
                 MatrixVpnService.STATE_DISCONNECTED -> {
                     qualityTracker.reset()
+                    val userStopped = manualDisconnectInProgress
                     manualDisconnectInProgress = false
-                    engineSwitchInProgress = false
-                    connectButton.isEnabled = true
-                    warpModeButton.isEnabled = true
+                    // Do not unlock a user-initiated mode switch when the old engine reports down.
+                    // The exclusive-start worker still has to stop and verify both backends.
+                    if (userStopped) {
+                        engineSwitchInProgress = false
+                        connectButton.isEnabled = true
+                        warpModeButton.isEnabled = true
+                    }
                 }
             }
         }
