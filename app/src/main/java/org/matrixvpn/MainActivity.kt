@@ -145,7 +145,7 @@ class MainActivity : Activity() {
             setPadding(8, 24, 8, 4)
         }
         val menuSubtitle = TextView(this).apply {
-            text = "PRIVATE NETWORK  /  0.7.1"
+            text = "PRIVATE NETWORK  /  0.7.2"
             textSize = 11f
             letterSpacing = 0.18f
             setTextColor(Color.rgb(166, 210, 190))
@@ -155,7 +155,7 @@ class MainActivity : Activity() {
         val connectionHeading = sectionHeading("СОСТОЯНИЕ СОЕДИНЕНИЯ")
         val helpHeading = sectionHeading("СПРАВКА")
         status = TextView(this).apply {
-            text = "MATRIX GLASS  •  0.7.1\nVPN-туннель: не подключён\nOpenVPN 3 Core + AmneziaWG готовы к работе"
+            text = "MATRIX GLASS  •  0.7.2\nVPN-туннель: не подключён\nOpenVPN 3 Core + AmneziaWG готовы к работе"
             textSize = 16f
             setTextColor(Color.WHITE)
             gravity = Gravity.CENTER
@@ -291,10 +291,10 @@ class MainActivity : Activity() {
         val density = resources.displayMetrics.density
         val screenRoot = FrameLayout(this).apply {
             setBackgroundColor(Color.rgb(2, 9, 8))
-            addView(MatrixGlobeView(this), FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+            addView(MatrixGlobeView(this@MainActivity), FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
             addView(mainScreen, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
             addView(
-                TrafficMeterView(this),
+                TrafficMeterView(this@MainActivity),
                 FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.END).apply {
                     topMargin = (9 * density).toInt()
                     marginEnd = (10 * density).toInt()
