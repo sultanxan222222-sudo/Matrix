@@ -1,42 +1,29 @@
-# MATRIX VPN — Hybrid
+# MATRIX VPN — Hybrid 0.7.2
 
-MATRIX is an Android VPN client with a dedicated WARP profile flow, an encrypted multi-profile pool, WireGuard/AmneziaWG tunnel support, a public OpenVPN catalogue hand-off, and evidence-based profile selection.
+MATRIX is an Android VPN client with dedicated WARP and VPN flows, encrypted profile storage, AmneziaWG/WireGuard support, an embedded OpenVPN 3 Core path, and a compact Matrix-inspired visual interface.
 
-## Implemented in 0.6.0
+## Implemented in 0.7.2
 
-- Dedicated WARP — separate mode entry restored in the main screen. It obtains a WARP-compatible WireGuard/AWG profile from a third-party community generator. This is not an official Cloudflare API or a Cloudflare-supported custom client.
-- Multiple WireGuard/AmneziaWG profiles can be saved, selected, and deleted. Each configuration is encrypted with AES-GCM using a key held in Android Keystore; metadata is stored separately.
-- Existing 0.5.x single-profile storage is migrated into the encrypted profile pool on first launch.
-- Per-profile history records successful/failed HTTPS connectivity checks and a smoothed response-time estimate. The pool UI ranks profiles using local observations; unknown profiles are clearly marked untested.
-- Guarded fallback attempts saved WireGuard/AmneziaWG profiles only when Android confirms MATRIX is configured as Always-on VPN with Block connections without VPN (lockdown). WARP mode is excluded from cross-provider fallback so it remains separate.
-- VPN Gate directory discovery is retained. VPN Gate publishes OpenVPN profiles; MATRIX shares them with a compatible external OpenVPN app. The embedded MATRIX tunnel backend does not natively connect OpenVPN profiles.
-- Manual import from Android file picker or clipboard remains available.
-- User permission is required before starting a tunnel; MATRIX does not auto-connect on app launch.
+- Dedicated WARP profile acquisition and connection flow using the AmneziaWG backend.
+- Standard WireGuard and AmneziaWG profile import and connection.
+- Embedded OpenVPN 3 Core through a Rust/JNI bridge and Android VpnService for OpenVPN profiles, including VPN Gate profiles.
+- AES-GCM encrypted profile vault backed by Android Keystore.
+- Per-profile health history and evidence-based local ranking.
+- Guarded sequential fallback among saved WireGuard/AmneziaWG profiles when Android Always-on VPN + Block connections without VPN lockdown is enabled.
+- VPN Gate public directory discovery.
+- Compact glass navigation controls preserving the existing translucent visual language.
+- Animated green Matrix globe with a moving route marker and luminous trail.
+- Small gold RX/TX rate indicator based on traffic counters for the MATRIX Android UID.
 
-## Important limits
+## Important limits and validation
 
-- WARP profiles are obtained from a third-party generator. Download or parsing does not prove a real Cloudflare WARP tunnel is reachable.
-- HTTPS reachability through a tunnel is a practical signal, not a cryptographic WireGuard peer-handshake measurement or proof of anonymity.
-- Automatic fallback is sequential recovery after a failed initial HTTPS probe, not seamless multipath. It is gated by Android lockdown to reduce leak risk.
-- VPN Gate nodes are volunteer-operated and may be slow, unstable, or untrusted. OpenVPN files are handed to a separate OpenVPN client.
-- A trustworthy public WireGuard directory cannot be assumed to provide valid credentials or safe endpoints. MATRIX does not invent node keys or publish third-party private keys.
-- Real-device verification remains required for generated WARP profiles, DNS/IPv6 leak behavior, Android lockdown interaction, and network handover.
+- The WARP profile generator is a third-party community service, not an official Cloudflare API. Profile retrieval does not prove a working Cloudflare WARP tunnel.
+- RX/TX figures are Android UID traffic rates, not total-device throughput or proof of traffic through a particular VPN node.
+- HTTPS reachability is a practical connectivity signal, not a peer-handshake measurement or proof of anonymity.
+- Fallback is sequential recovery after a failed initial connectivity check, not seamless multipath or live cross-engine failover.
+- VPN Gate nodes are volunteer-operated and may be slow, unstable, or untrusted. Do not use them for sensitive traffic.
+- CI compilation and unit tests do not replace real-device checks for OpenVPN TUN lifecycle, DNS/IPv6 leaks, Android lockdown, mobile/Wi-Fi handover, and long-running stability.
 
-## Architecture
+## Build
 
-- Tunnel engine: AmneziaWG Android backend, intended for standard WireGuard and AWG profiles.
-- Profile vault: AES-GCM encrypted per-profile storage backed by Android Keystore.
-- WARP flow: isolated profile acquisition and selection; user-controlled connect.
-- Free-node directory: VPN Gate OpenVPN catalogue with explicit external-client hand-off.
-- Health and selection: locally observed success/failure plus smoothed HTTPS response time.
-- Recovery: ordered fallback only under Android Always-on VPN + lockdown.
-- Network watcher and Cloudflare trace probe provide diagnostics; neither alone proves peer identity.
-
-## Build and validation
-
-CI runs gradle testDebugUnitTest assembleDebug with JDK 17 and Android SDK 36. The debug APK is uploaded as matrix-vpn-debug-apk artifact for 14 days. CI success confirms compilation and unit tests, not real-device VPN operation.
-
-Target initial validation device: Realme Note 50, Android 15. Android 13–16 remain compatibility targets until tested.
-
-
-<!-- Native OpenVPN bridge compile fix verified; rebuild trigger. -->
+CI uses JDK 17, Android SDK 36, NDK 27.2, and builds the ARM64 native OpenVPN bridge plus the Android debug APK. Android 13–16 remain compatibility targets until validated on physical devices.

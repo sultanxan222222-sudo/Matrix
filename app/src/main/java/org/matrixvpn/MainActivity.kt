@@ -19,6 +19,7 @@ import android.text.InputType
 import android.view.Gravity
 import android.view.ViewGroup
 import android.widget.Button
+import android.widget.FrameLayout
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ScrollView
@@ -246,7 +247,11 @@ class MainActivity : Activity() {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_HORIZONTAL
             setPadding(16, 16, 16, 34)
-            background = GradientDrawable(GradientDrawable.Orientation.TL_BR, intArrayOf(Color.rgb(3, 15, 13), Color.rgb(5, 10, 15), Color.rgb(3, 17, 12)))
+            // Keep the glass cards, but let the animated globe remain visible behind them.
+            background = GradientDrawable(
+                GradientDrawable.Orientation.TL_BR,
+                intArrayOf(Color.argb(42, 3, 15, 13), Color.argb(48, 5, 10, 15), Color.argb(42, 3, 17, 12))
+            )
             addView(title)
             addView(menuSubtitle)
             addView(modePanel, menuButtonParams())
@@ -257,7 +262,8 @@ class MainActivity : Activity() {
         }
         val mainScreen = ScrollView(this).apply {
             isFillViewport = true
-            background = GradientDrawable(GradientDrawable.Orientation.TL_BR, intArrayOf(Color.rgb(3, 15, 13), Color.rgb(5, 9, 14), Color.rgb(3, 18, 13)))
+            setBackgroundColor(Color.TRANSPARENT)
+            clipToPadding = false
             addView(menuContent, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         }
         listOf(importButton, findWireGuardButton, findVpnButton, pasteButton, profilesButton, recoveryButton).forEachIndexed { index, button ->
@@ -267,8 +273,10 @@ class MainActivity : Activity() {
             )
             button.backgroundTintList = null
             button.setTextColor(Color.rgb(222, 239, 228))
-            button.textSize = 14f
-            button.minHeight = (58 * resources.displayMetrics.density).toInt()
+            button.textSize = 12.5f
+            button.minHeight = (44 * resources.displayMetrics.density).toInt()
+            button.minWidth = 0
+            button.setPadding(10, 2, 10, 2)
             button.isAllCaps = false
             button.typeface = android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL)
             button.elevation = 5f * resources.displayMetrics.density
@@ -280,9 +288,22 @@ class MainActivity : Activity() {
         help.setTextColor(Color.rgb(165, 198, 184))
         help.textSize = 12f
         title.setShadowLayer(22f, 0f, 0f, Color.rgb(40, 255, 170))
+        val density = resources.displayMetrics.density
+        val screenRoot = FrameLayout(this).apply {
+            setBackgroundColor(Color.rgb(2, 9, 8))
+            addView(MatrixGlobeView(this), FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+            addView(mainScreen, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+            addView(
+                TrafficMeterView(this),
+                FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.END).apply {
+                    topMargin = (9 * density).toInt()
+                    marginEnd = (10 * density).toInt()
+                }
+            )
+        }
         setContentView(MatrixRainView(this))
         window.decorView.postDelayed({
-            setContentView(mainScreen)
+            setContentView(screenRoot)
         }, 1800L)
         networkWatcher = NetworkWatcher(this) { state ->
             runOnUiThread { networkStatus.text = state.summary() }
@@ -345,9 +366,11 @@ class MainActivity : Activity() {
         button.background = glassSurface(tint, gold, 30f)
         button.backgroundTintList = null
         button.setTextColor(if (active) Color.rgb(255, 242, 205) else Color.rgb(232, 239, 222))
-        button.textSize = 19f
+        button.textSize = 16f
         button.typeface = android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL)
-        button.minHeight = (94 * resources.displayMetrics.density).toInt()
+        button.minHeight = (64 * resources.displayMetrics.density).toInt()
+        button.minWidth = 0
+        button.setPadding(12, 2, 12, 2)
         button.elevation = if (active) 22f * resources.displayMetrics.density else 12f * resources.displayMetrics.density
         button.stateListAnimator = null
         button.setShadowLayer(if (active) 22f else 9f, 0f, 0f, if (active) Color.rgb(255, 204, 105) else Color.rgb(108, 210, 175))
@@ -518,6 +541,9 @@ class MainActivity : Activity() {
         ViewGroup.LayoutParams.MATCH_PARENT,
         ViewGroup.LayoutParams.WRAP_CONTENT
     ).apply {
+        val side = (8 * resources.displayMetrics.density).toInt()
+        marginStart = side
+        marginEnd = side
         bottomMargin = (6 * resources.displayMetrics.density).toInt()
     }
 

@@ -9,8 +9,8 @@ android {
         applicationId = "org.matrixvpn"
         minSdk = 26
         targetSdk = 35
-        versionCode = 12
-        versionName = "0.7.1"
+        versionCode = 13
+        versionName = "0.7.2"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     compileOptions {
