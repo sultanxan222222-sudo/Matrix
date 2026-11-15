@@ -1429,6 +1429,7 @@ class MainActivity : Activity() {
                     profile
                 )
                 savedProfiles.add(saved)
+                SecureProfileVault.setActive(this, previousActiveId)
             } catch (error: Exception) {
                 failures.add("${server.host}: ${error.message ?: "ошибка профиля"}")
             }
