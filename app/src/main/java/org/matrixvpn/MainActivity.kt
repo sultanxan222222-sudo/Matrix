@@ -74,6 +74,9 @@ class MainActivity : Activity() {
     private var activeProfileProvider: String = "Импорт"
     private var openVpnProfileText: String? = null
     private var pendingOpenVpnStart = false
+    private var pendingRecoveryReason: String? = null
+    private var pendingRecoveryExcludedId: String? = null
+    private var pendingRecoveryPreferredIds: List<String> = emptyList()
     private var openVpnRunning = false
     private var openVpnState: String = MatrixVpnService.STATE_DISCONNECTED
     private var openVpnReceiverRegistered = false
@@ -1505,8 +1508,12 @@ class MainActivity : Activity() {
             status.text = "$reason\nАвтоматический переход заблокирован: включите Android Always-on VPN и блокировку подключений без VPN."
             return
         }
-        if (VpnService.prepare(this) != null) {
-            status.text = "$reason\nAndroid ещё не предоставил MATRIX разрешение VPN; выполните подключение вручную."
+        val vpnConsent = VpnService.prepare(this)
+        if (vpnConsent != null) {
+            pendingRecoveryReason = reason
+            pendingRecoveryExcludedId = excludedProfileId
+            pendingRecoveryPreferredIds = preferredProfileIds
+            startActivityForResult(vpnConsent, vpnPermissionRequest)
             return
         }
 
@@ -1820,8 +1827,22 @@ class MainActivity : Activity() {
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
         if (requestCode == vpnPermissionRequest) {
-            if (resultCode == RESULT_OK) startSelectedVpnTunnel()
-            else showError("Разрешение VPN не предоставлено", "Android не разрешил приложению MATRIX создать VPN-туннель.")
+            val recoveryReason = pendingRecoveryReason
+            if (resultCode == RESULT_OK && recoveryReason != null) {
+                val excludedId = pendingRecoveryExcludedId
+                val preferredIds = pendingRecoveryPreferredIds
+                pendingRecoveryReason = null
+                pendingRecoveryExcludedId = null
+                pendingRecoveryPreferredIds = emptyList()
+                startCrossEngineRecovery(excludedId, recoveryReason, preferredIds)
+            } else if (resultCode == RESULT_OK) {
+                startSelectedVpnTunnel()
+            } else {
+                pendingRecoveryReason = null
+                pendingRecoveryExcludedId = null
+                pendingRecoveryPreferredIds = emptyList()
+                showError("Разрешение VPN не предоставлено", "Android не разрешил приложению MATRIX создать VPN-туннель.")
+            }
             return
         }
         if (requestCode != pickProfileRequest || resultCode != RESULT_OK) return
