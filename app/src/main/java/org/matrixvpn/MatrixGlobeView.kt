@@ -74,7 +74,7 @@ class MatrixGlobeView(context: Context) : View(context) {
         val lon = longitude * PI / 180.0 + spin
         val cosLat = cos(lat)
         return ProjectedPoint(
-            centerX + radius * cosLat * sin(lon).toFloat(),
+            centerX + radius * cosLat.toFloat() * sin(lon).toFloat(),
             centerY - radius * sin(lat).toFloat(),
             (cosLat * cos(lon)).toFloat()
         )
@@ -109,7 +109,8 @@ class MatrixGlobeView(context: Context) : View(context) {
         }
         for (latitude in listOf(-66f, -45f, -22f, 0f, 22f, 45f, 66f)) {
             val y = centerY - radius * sin(latitude * PI / 180.0).toFloat()
-            val h = (radius * cos(latitude * PI / 180.0) * 0.12f).coerceAtLeast(2f)
+            val cosLatitude = cos(latitude * PI / 180.0).toFloat()
+            val h = (radius * cosLatitude * 0.12f).coerceAtLeast(2f)
             canvas.drawOval(RectF(centerX - radius, y - h, centerX + radius, y + h), gridPaint)
         }
         for (shape in landShapes) {
