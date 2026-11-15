@@ -443,6 +443,7 @@ class MainActivity : Activity() {
             )
             openVpnReceiverRegistered = true
         }
+        refreshModeButtons()
     }
 
     override fun onStop() {
