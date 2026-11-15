@@ -84,12 +84,14 @@ class MainActivity : Activity() {
     private val qualityTracker = TunnelQualityTracker(failoverFailureThreshold = 3)
     @Volatile private var qualityProbeInProgress = false
     @Volatile private var autoRecoveryInProgress = false
+    @Volatile private var manualDisconnectInProgress = false
+    @Volatile private var wireGuardStartupInProgress = false
     private val qualityMonitorRunnable = object : Runnable {
         override fun run() {
             if (isFinishing || isDestroyed) return
             val serviceState = MatrixVpnService.currentState(this@MainActivity)
             if (openVpnProfileText != null && serviceState == MatrixVpnService.STATE_ERROR &&
-                isMatrixLockdownEnabled() && !autoRecoveryInProgress) {
+                isMatrixLockdownEnabled() && !autoRecoveryInProgress && !manualDisconnectInProgress) {
                 startCrossEngineRecovery(activeProfileId, "OpenVPN остановился с ошибкой в фоновом режиме.")
             } else if (isVpnSessionConnected()) {
                 runQualityProbe()
@@ -118,11 +120,16 @@ class MainActivity : Activity() {
                 }
                 MatrixVpnService.STATE_ERROR -> {
                     qualityTracker.reset()
-                    if (!autoRecoveryInProgress && isMatrixLockdownEnabled()) {
+                    val userStopped = manualDisconnectInProgress
+                    manualDisconnectInProgress = false
+                    if (!userStopped && !autoRecoveryInProgress && isMatrixLockdownEnabled()) {
                         startCrossEngineRecovery(activeProfileId, message.ifBlank { "OpenVPN завершился с ошибкой." })
                     }
                 }
-                MatrixVpnService.STATE_DISCONNECTED -> qualityTracker.reset()
+                MatrixVpnService.STATE_DISCONNECTED -> {
+                    qualityTracker.reset()
+                    manualDisconnectInProgress = false
+                }
             }
         }
     }
@@ -161,6 +168,7 @@ class MainActivity : Activity() {
     private val matrixTunnel = object : Tunnel {
         override fun getName(): String = "matrix"
         override fun onStateChange(newState: State) {
+            val wasUp = tunnelUp
             runOnUiThread {
                 tunnelUp = newState == State.UP
                 status.text = if (tunnelUp) {
@@ -169,8 +177,17 @@ class MainActivity : Activity() {
                     "VPN-туннель: отключён\nАктивный профиль: $activeProfileName"
                 }
                 refreshModeButtons()
-                if (tunnelUp) scheduleQualityMonitor(QUALITY_FIRST_PROBE_DELAY_MS)
-                else if (!autoRecoveryInProgress) qualityTracker.reset()
+                if (tunnelUp) {
+                    scheduleQualityMonitor(QUALITY_FIRST_PROBE_DELAY_MS)
+                } else {
+                    qualityTracker.reset()
+                    val userStopped = manualDisconnectInProgress
+                    manualDisconnectInProgress = false
+                    if (wasUp && !userStopped && !wireGuardStartupInProgress &&
+                        !autoRecoveryInProgress && isMatrixLockdownEnabled()) {
+                        startCrossEngineRecovery(activeProfileId, "WireGuard/AmneziaWG остановился во время работы.")
+                    }
+                }
             }
         }
         override fun isIpv4ResolutionPreferred(): Boolean = true
@@ -532,6 +549,7 @@ class MainActivity : Activity() {
     }
 
     private fun startSelectedVpnTunnel() {
+        manualDisconnectInProgress = false
         if (openVpnProfileText != null) startEmbeddedOpenVpnTunnel() else startWireGuardTunnel()
     }
 
@@ -1284,20 +1302,24 @@ class MainActivity : Activity() {
 
     private fun connectOrDisconnect() {
         if (openVpnRunning) {
+            manualDisconnectInProgress = true
             MatrixVpnService.stop(this)
             return
         }
         if (tunnelUp) {
+            manualDisconnectInProgress = true
             connectButton.isEnabled = false
             Thread {
                 try {
                     wireGuardBackend.setState(matrixTunnel, State.DOWN, null)
                     runOnUiThread {
+                        manualDisconnectInProgress = false
                         status.text = "VPN-туннель: отключён"
                         connectButton.isEnabled = true
                     }
                 } catch (e: Exception) {
                     runOnUiThread {
+                        manualDisconnectInProgress = false
                         connectButton.isEnabled = true
                         showError("Не удалось отключить VPN", e.message ?: "Не удалось остановить туннель.")
                     }
@@ -1322,6 +1344,8 @@ class MainActivity : Activity() {
 
     private fun startWireGuardTunnel() {
         val config = wireGuardConfig ?: return
+        manualDisconnectInProgress = false
+        wireGuardStartupInProgress = true
         val startingProfileId = activeProfileId
         val startingProfileName = activeProfileName
         val startingProvider = activeProfileProvider
@@ -1389,6 +1413,7 @@ class MainActivity : Activity() {
                 try { wireGuardBackend.setState(matrixTunnel, State.DOWN, null) } catch (_: Exception) { }
             }
             runOnUiThread {
+                wireGuardStartupInProgress = false
                 status.text = finalText
                 connectButton.isEnabled = true
                 connectButton.text = if (connected && tunnelUp) "Отключить VPN" else "Подключить VPN"
