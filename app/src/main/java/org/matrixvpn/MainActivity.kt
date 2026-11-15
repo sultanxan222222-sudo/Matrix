@@ -1500,7 +1500,7 @@ class MainActivity : Activity() {
 
     /** Foreground quality monitor: three consecutive failed probes are needed before a switch. */
     private fun runQualityProbe() {
-        if (qualityProbeInProgress || autoRecoveryInProgress || !isVpnSessionConnected()) return
+        if (qualityProbeInProgress || autoRecoveryInProgress || manualDisconnectInProgress || !isVpnSessionConnected()) return
         qualityProbeInProgress = true
         val checkedProfileId = activeProfileId
         Thread {
@@ -1511,7 +1511,7 @@ class MainActivity : Activity() {
             val snapshot = qualityTracker.record(result.reachable, latency)
             runOnUiThread {
                 qualityProbeInProgress = false
-                if (!isVpnSessionConnected() || isFinishing || isDestroyed) return@runOnUiThread
+                if (manualDisconnectInProgress || !isVpnSessionConnected() || isFinishing || isDestroyed) return@runOnUiThread
                 val label = when (snapshot.quality) {
                     TunnelQuality.HEALTHY -> "ХОРОШЕЕ"
                     TunnelQuality.DEGRADED -> "НЕСТАБИЛЬНО"
