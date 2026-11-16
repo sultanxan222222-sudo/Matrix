@@ -1,7 +1,7 @@
 name: Android CI
 on:
   push:
-    branches: [main]
+    branches: [main, feature/matrix-ai-core]
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -21,7 +21,10 @@ jobs:
           gradle-version: '8.13'
       - name: Build and run unit tests
         run: gradle testDebugUnitTest assembleDebug
-      - name: Upload debug APK
+      # Feature branches compile and test continuously, but do not publish
+      # interim APKs. Only the main branch publishes a downloadable artifact.
+      - name: Upload release-candidate debug APK
+        if: github.ref == 'refs/heads/main'
         uses: actions/upload-artifact@v4
         with:
           name: matrix-vpn-debug-apk
