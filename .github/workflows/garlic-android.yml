@@ -14,6 +14,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: garlic-android-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build-garlic-android:
     runs-on: ubuntu-latest
@@ -36,7 +40,14 @@ jobs:
             SDKMANAGER="$(find "$ANDROID_HOME/cmdline-tools" -name sdkmanager -type f -print -quit)"
           fi
           test -x "$SDKMANAGER"
+          set +o pipefail
           yes | "$SDKMANAGER" --licenses >/dev/null
+          LICENSE_STATUS=$?
+          set -o pipefail
+          if [[ "$LICENSE_STATUS" -ne 0 ]]; then
+            echo "Android SDK licence acceptance failed." >&2
+            exit "$LICENSE_STATUS"
+          fi
           "$SDKMANAGER" --install "ndk;27.2.12479018" "cmake;3.22.1" "platforms;android-35"
 
       - name: Build clspv, compile Garlic SPIR-V, and build clvk for Android ARM64
