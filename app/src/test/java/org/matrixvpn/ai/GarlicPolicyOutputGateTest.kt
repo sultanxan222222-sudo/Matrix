@@ -26,6 +26,25 @@ class GarlicPolicyOutputGateTest {
         assertEquals("candidate-b", advice.profileId)
     }
 
+
+    @Test
+    fun acceptsConnectProfileOnlyWhenHostAllowsCandidate() {
+        val advice = GarlicPolicyOutputGate.validate(
+            """{"action":"CONNECT_PROFILE","profile_id":"warp-a","confidence":0.91,"reason_code":"NO_ACTIVE_TUNNEL"}""",
+            setOf("warp-a", "warp-b")
+        )
+        assertEquals(GarlicPolicyOutputGate.Action.CONNECT_PROFILE, advice.action)
+        assertEquals("warp-a", advice.profileId)
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun rejectsConnectProfileWhenTunnelHostDidNotAuthorizeCandidate() {
+        GarlicPolicyOutputGate.validate(
+            """{"action":"CONNECT_PROFILE","profile_id":"invented","confidence":0.99,"reason_code":"CONNECT_NOW"}""",
+            setOf("warp-a")
+        )
+    }
+
     @Test(expected = IllegalArgumentException::class)
     fun rejectsModelInventedProfileId() {
         GarlicPolicyOutputGate.validate(
