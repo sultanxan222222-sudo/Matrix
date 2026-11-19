@@ -22,6 +22,8 @@ android {
 }
 dependencies {
     implementation("androidx.core:core-ktx:1.15.0")
+    // Google on-device LLM runtime; runs Qwen3.5 .litertlm models on Android.
+    implementation("com.google.ai.edge.litertlm:litertlm-android:0.19.1")
     // Embeddable AmneziaWG tunnel library; supports AWG configuration extensions
     // while retaining the WireGuard Android backend/config API used by MATRIX.
     implementation("com.zaneschepke:amneziawg-android:2.3.7")
