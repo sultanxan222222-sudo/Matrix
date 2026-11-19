@@ -5,6 +5,10 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 typedef struct {
     uint32_t n_vocab, n_merges;
     const uint32_t* byte_id;     // [256] token id of each raw byte
@@ -23,5 +27,9 @@ int tok_load(Tokenizer* t, const uint8_t* data, size_t size);
 int tok_encode(const Tokenizer* t, const char* utf8, uint32_t* out, int max);
 // raw bytes of one token (may be part of a UTF-8 character); special tokens give 0 bytes
 int tok_piece(const Tokenizer* t, uint32_t id, const uint8_t** bytes);
+
+#ifdef __cplusplus
+} // extern "C"
+#endif
 
 #endif
