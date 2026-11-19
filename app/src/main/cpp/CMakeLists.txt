@@ -4,7 +4,9 @@ project(matrix_garlic_android LANGUAGES C CXX)
 add_library(matrix_garlic SHARED
     garlic_opencl_probe.cpp
     garlic_opencl_runtime.cpp
+    garlic_matrix_policy_jni.cpp
     garlic/engine_android.c
+    ../../../../third_party/garlic-llm/chat/tokenizer.c
 )
 
 target_include_directories(matrix_garlic PRIVATE
@@ -15,6 +17,8 @@ target_include_directories(matrix_garlic PRIVATE
 target_compile_definitions(matrix_garlic PRIVATE MATRIX_ANDROID=1)
 
 target_compile_features(matrix_garlic PRIVATE cxx_std_17)
+set_property(TARGET matrix_garlic PROPERTY C_STANDARD 11)
+set_property(TARGET matrix_garlic PROPERTY C_STANDARD_REQUIRED ON)
 target_compile_options(matrix_garlic PRIVATE -Wall -Wextra -Werror=return-type)
 
 find_library(ANDROID_LOG_LIB log REQUIRED)
