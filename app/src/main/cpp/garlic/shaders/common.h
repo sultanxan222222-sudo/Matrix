@@ -209,7 +209,7 @@ void block_sums(global const float* x, global float* bsum, uint n) {
 
 static float dot_q4_word_s(uint w, global const float* restrict xl, global const float* restrict xh) {   // as dot_q4_word, x from scalar regs
     uint lo = w & 0x0F0F0F0Fu, hi = (w >> 4) & 0x0F0F0F0Fu;
-    __asm__("" : "+v"(lo), "+v"(hi));
+    /* Android: remove no-op AMD register constraints */
     float s = (float)(lo & 0xFFu) * xl[0];
     s += (float)((lo >> 8) & 0xFFu) * xl[1];
     s += (float)((lo >> 16) & 0xFFu) * xl[2];
@@ -270,7 +270,7 @@ void matvec_q4i8(global const uint4v* restrict w, global const half_t* restrict 
 
 static float dot_q3_group(uint lo, uint hi, global const float* restrict xg) {   // 4 weights' bytes . 4 x
     uint q = lo | hi;
-    __asm__("" : "+v"(q));
+    /* Android: remove no-op AMD register constraint */
     float s = (float)(q & 0xFFu) * xg[0];
     s += (float)((q >> 8) & 0xFFu) * xg[1];
     s += (float)((q >> 16) & 0xFFu) * xg[2];
@@ -296,7 +296,7 @@ static inline __attribute__((always_inline)) void mvq3i(global const uint* restr
                                                         global const float* restrict bsum, global float* restrict y,
                                                         uint cols, local float* part, const uint WAVES) {
     uint l = LID & 63, nb = cols / 32;
-    uint wv = __builtin_amdgcn_readfirstlane(LID >> 6);
+    uint wv = (LID >> 6);
     ulong tile = (ulong)GID * nb * 64;
     global const uint* wp = w + (tile + l) * 3;
     global const half_t* sp = sc + tile + l;
