@@ -1,6 +1,14 @@
 name: Build Garlic Qwen3.5 0.8B model pack
 
 on:
+  push:
+    branches: [feature/matrix-ai-core]
+    paths:
+      - "native/garlic_android/build_qwen35_model_pack.py"
+      - "third_party/garlic-llm/pc/q4.py"
+      - "third_party/garlic-llm/pc/export_chat.py"
+      - "third_party/garlic-llm/pc/gpu.py"
+      - ".github/workflows/garlic-model-pack.yml"
   workflow_dispatch:
     inputs:
       model:
