@@ -54,9 +54,9 @@ class GarlicMatrixPolicy(
     }
 
     /**
-     * Evaluates a pre-filtered snapshot. This does not activate or switch a VPN profile.
-     * The caller must validate the returned JSON against its configured candidate IDs,
-     * confidence policy, profile authentication and traffic protection state.
+     * Evaluates a pre-filtered snapshot. Returns an untrusted recommendation that may request connection or failover to one
+     * candidate supplied by MATRIX. The caller must validate the JSON against its candidate
+     * allowlist and stop-latch generation before changing any tunnel state.
      */
     fun assess(observationJson: String): CompletableFuture<String> = submit {
         require(observationJson.isNotBlank() && observationJson.length <= 64 * 1024) {
