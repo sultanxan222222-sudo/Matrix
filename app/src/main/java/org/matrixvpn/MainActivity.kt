@@ -40,6 +40,7 @@ import java.util.UUID
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.ConcurrentHashMap
 
 class MainActivity : Activity() {
     private lateinit var status: TextView
@@ -50,7 +51,14 @@ class MainActivity : Activity() {
     private lateinit var networkWatcher: NetworkWatcher
     private lateinit var aiStatus: TextView
     private data class VpnCandidate(val id: String, val label: String, val config: Config)
+    private data class CandidateHealth(
+        val reachable: Boolean,
+        val latencyMillis: Long?,
+        val httpCode: Int?,
+        val checkedAtMillis: Long
+    )
     private val vpnCandidates = linkedMapOf<String, VpnCandidate>()
+    private val candidateHealth = ConcurrentHashMap<String, CandidateHealth>()
     private val autopilotLatch = AutopilotSafetyLatch()
     private val mainHandler = Handler(Looper.getMainLooper())
     private var autoHealthCheck: Runnable? = null
@@ -418,9 +426,23 @@ class MainActivity : Activity() {
         val allowedIds = remaining.map { it.id }.toSet()
         val candidateJson = JSONArray().apply { remaining.forEach { put(it.id) } }
         val excludedJson = JSONArray().apply { excludedIds.forEach { put(it) } }
+        val healthJson = JSONArray().apply {
+            val now = System.currentTimeMillis()
+            candidateHealth.forEach { (id, health) ->
+                put(
+                    JSONObject()
+                        .put("profile_id", id)
+                        .put("reachable", health.reachable)
+                        .put("rtt_ms", health.latencyMillis ?: JSONObject.NULL)
+                        .put("http_status", health.httpCode ?: JSONObject.NULL)
+                        .put("age_seconds", ((now - health.checkedAtMillis).coerceAtLeast(0L) / 1000L))
+                )
+            }
+        }
         val observation = JSONObject()
             .put("policy_scope", "vpn_candidate_selection")
             .put("automatic_connection_authorized", true)
+            .put("selection_objective", "Prefer recently verified reachable candidates with lower RTT; avoid previously failed candidates; preserve the current route when healthy.")
             .put("tunnel_active", tunnelUp)
             .put("current_profile_id", activeCandidateId ?: JSONObject.NULL)
             .put("connectivity_known", lastProbe != null)
@@ -429,6 +451,7 @@ class MainActivity : Activity() {
             .put("external_http_status", lastProbe?.httpCode ?: JSONObject.NULL)
             .put("candidate_count", remaining.size)
             .put("candidate_profile_ids", candidateJson)
+            .put("candidate_health", healthJson)
             .put("failed_profile_ids", excludedJson)
             .toString()
 
@@ -521,6 +544,12 @@ class MainActivity : Activity() {
                     val probe = TunnelConnectivityProbe.check()
                     if (!autopilotLatch.isActive(token)) return@probeTask
 
+                    candidateHealth[candidate.id] = CandidateHealth(
+                        reachable = probe.reachable,
+                        latencyMillis = probe.latencyMillis,
+                        httpCode = probe.httpCode,
+                        checkedAtMillis = System.currentTimeMillis()
+                    )
                     if (probe.reachable) {
                         runOnUiThread {
                             if (!autopilotLatch.isActive(token)) return@runOnUiThread
@@ -634,6 +663,14 @@ class MainActivity : Activity() {
                     val probe = TunnelConnectivityProbe.check()
                     if (!autopilotLatch.isActive(token)) return@healthProbeTask
                     val currentId = activeCandidateId
+                    if (currentId != null) {
+                        candidateHealth[currentId] = CandidateHealth(
+                            reachable = probe.reachable,
+                            latencyMillis = probe.latencyMillis,
+                            httpCode = probe.httpCode,
+                            checkedAtMillis = System.currentTimeMillis()
+                        )
+                    }
                     val failed = if (!probe.reachable && currentId != null) {
                         setOf(currentId)
                     } else {
@@ -1135,6 +1172,14 @@ class MainActivity : Activity() {
                 probeExecutor.execute manualProbeTask@{
                     val probe = TunnelConnectivityProbe.check()
                     if (manualConnectGeneration.get() != generation) return@manualProbeTask
+                    activeCandidateId?.let { id ->
+                        candidateHealth[id] = CandidateHealth(
+                            reachable = probe.reachable,
+                            latencyMillis = probe.latencyMillis,
+                            httpCode = probe.httpCode,
+                            checkedAtMillis = System.currentTimeMillis()
+                        )
+                    }
                     runOnUiThread {
                         if (manualConnectGeneration.get() != generation) return@runOnUiThread
                         requestGarlicNetworkAssessment(probe)
