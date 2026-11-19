@@ -81,8 +81,8 @@ LIBCLC_DIR="$(dirname "$(dirname "$LIBCLC_32")")"
 
 HOST_TAG="linux-x86_64"
 SYSROOT="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/$HOST_TAG/sysroot"
-VULKAN_LIB="$SYSROOT/usr/lib/aarch64-linux-android/$ANDROID_API/libvulkan.so"
-if [[ ! -f "$VULKAN_LIB" ]]; then
+VULKAN_LIB="$(find "$SYSROOT/usr/lib/aarch64-linux-android" -name 'libvulkan.so' -type f -print -quit)"
+if [[ -z "$VULKAN_LIB" || ! -f "$VULKAN_LIB" ]]; then
   echo "Android NDK Vulkan stub library is missing: $VULKAN_LIB" >&2
   exit 5
 fi
@@ -112,7 +112,7 @@ cmake -S "$CLVK_DIR" -B "$ANDROID_BUILD" \
   -DCLVK_BUILD_TESTS=OFF
 cmake --build "$ANDROID_BUILD" --target OpenCL --parallel "${GARLIC_BUILD_JOBS:-2}"
 
-OPENCL_LIB="$(find "$ANDROID_BUILD" -type f \\( -name 'libOpenCL.so' -o -name 'libOpenCL.so.*' \\) -print -quit)"
+OPENCL_LIB="$(find "$ANDROID_BUILD" -type f \( -name 'libOpenCL.so' -o -name 'libOpenCL.so.*' \) -print -quit)"
 if [[ -z "$OPENCL_LIB" ]]; then
   echo "clvk did not produce libOpenCL.so." >&2
   exit 6
