@@ -94,7 +94,7 @@ def main() -> None:
         # Q4i matrices are tiled in 64 rows. The embedding is deliberately kept in
         # Garlic's original row-major q4row layout: the CPU fetches just the requested
         # row and uploads that activation, avoiding a single 140+ MiB mobile GPU buffer.
-        if fmt == "q4i" and matrix.shape[0] % 64:
+        if fmt != "q4row" and matrix.shape[0] % 64:
             padded_rows = ((matrix.shape[0] + 63) // 64) * 64
             padded = np.zeros((padded_rows, matrix.shape[1]), dtype=np.float32)
             padded[:matrix.shape[0], :] = matrix
