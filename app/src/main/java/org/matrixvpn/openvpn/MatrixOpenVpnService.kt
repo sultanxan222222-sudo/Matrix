@@ -275,10 +275,10 @@ class MatrixOpenVpnService : VpnService(), IOpenVPNService {
         management?.stopVPN()
     }
 
-    override val ctResolver: ContentResolver
+    override val ctResolver: ContentResolver?
         get() = contentResolver
 
-    override val connectivityManager: ConnectivityManager
+    override val connectivityManager: ConnectivityManager?
         get() = getSystemService(CONNECTIVITY_SERVICE) as ConnectivityManager
 
     override fun openvpnStopped() {
@@ -293,7 +293,6 @@ class MatrixOpenVpnService : VpnService(), IOpenVPNService {
         val detail = when (state) {
             ConnectionState.CONNECTED -> "OpenVPN подключён."
             ConnectionState.CONNECTING -> "OpenVPN устанавливает соединение…"
-            ConnectionState.RECONNECTING -> "OpenVPN восстанавливает соединение…"
             ConnectionState.DISCONNECTING -> "OpenVPN отключается…"
             ConnectionState.DISCONNECTED -> "OpenVPN отключён или потерял соединение."
             ConnectionState.READYFORCONNECT -> "OpenVPN готов к подключению."
