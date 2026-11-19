@@ -120,11 +120,31 @@ static uint8_t* read_file(const char* path, size_t* size) {
     return buf;
 }
 
-static uint64_t gpu_alloc(Engine* e, uint64_t size) {
+static uint64_t cpu_alloc(Engine* e, uint64_t size) {
     uint64_t off = (e->next + 255) & ~255ull;
-    if (off + size > e->mem_size) return 0;
+    if (!size || off > e->mem_size || size > e->mem_size - off) return 0;
     e->next = off + size;
     return (uint64_t)(uintptr_t)(e->mem + off);
+}
+
+/* Every GPU allocation gets its own OpenCL buffer. This mirrors Garlic's address-based
+ * allocator without asking Android's Vulkan driver for one multi-gigabyte cl_mem object. */
+static uint64_t gpu_alloc(Engine* e, uint64_t size) {
+    uint64_t address = cpu_alloc(e, size);
+    if (!address) return 0;
+    MatrixClRuntime* runtime = (MatrixClRuntime*)e->android_cl_runtime;
+    if (!runtime || size > matrix_cl_max_allocation(runtime)) {
+        fail(e, "Garlic GPU allocation of %llu bytes exceeds the Vulkan device allocation limit.",
+             (unsigned long long)size);
+        return 0;
+    }
+    char error[256] = {0};
+    if (matrix_cl_register_region(runtime, (uintptr_t)address, (size_t)size,
+                                  (const void*)(uintptr_t)address, error, sizeof(error)) != 0) {
+        fail(e, "%s", error[0] ? error : "Could not register Garlic GPU memory region.");
+        return 0;
+    }
+    return address;
 }
 
 int eng_margin_mb = 64;
@@ -344,13 +364,15 @@ int engine_init(Engine* e, const char* dir, ProgressFn progress, void* user) {
              (unsigned)(e->mem_size >> 20), e->mem, e->n_layers, e->hidden, e->vocab);
     say("%s", line);
 
-    e->dcb = (uint32_t*)(uintptr_t)gpu_alloc(e, DCB_BYTES);
-    e->dcb_cap = DCB_BYTES / 4;
-    e->kargs = (uint8_t*)(uintptr_t)gpu_alloc(e, KARGS_BYTES);
-    e->kargs_cap = KARGS_BYTES;
-    e->label = (volatile uint32_t*)(uintptr_t)gpu_alloc(e, 256);
-    e->stamps = (volatile uint64_t*)(uintptr_t)gpu_alloc(e, 256);
+    /* Initialize clvk and cache the Garlic kernels before the first device allocation. */
     if (load_kernels(e, dir)) return -1;
+
+    e->dcb = (uint32_t*)(uintptr_t)cpu_alloc(e, DCB_BYTES);
+    e->dcb_cap = DCB_BYTES / 4;
+    e->kargs = (uint8_t*)(uintptr_t)cpu_alloc(e, KARGS_BYTES);
+    e->kargs_cap = KARGS_BYTES;
+    e->label = (volatile uint32_t*)(uintptr_t)cpu_alloc(e, 256);
+    e->stamps = (volatile uint64_t*)(uintptr_t)cpu_alloc(e, 256);
 
     if (gpu_selftest(e)) return -1;
 
@@ -512,7 +534,7 @@ int engine_init(Engine* e, const char* dir, ProgressFn progress, void* user) {
         e->pf_h = gpu_alloc(e, PF_ROWS * pf_wh * 4);
         if (!e->pf_h) e->pf = 0;
     }
-    e->model = gpu_alloc(e, e->weights_size);
+    e->model = cpu_alloc(e, e->weights_size);
     if (!e->model) {
         fail(e, "model does not fit in %u MiB", (unsigned)(e->mem_size >> 20));
         return -1;
@@ -538,6 +560,33 @@ int engine_init(Engine* e, const char* dir, ProgressFn progress, void* user) {
         return -1;
     }
     say("Garlic model weights loaded.");
+
+    /* Tensor payloads live in one CPU file image, but each tensor is a separate Vulkan buffer.
+       This preserves the original Garlic weight offsets while respecting maxMemoryAllocationSize. */
+    MatrixClRuntime* modelRuntime = (MatrixClRuntime*)e->android_cl_runtime;
+    for (uint32_t i = 0; i < e->n_tensors; ++i) {
+        const Tensor* tensor = &e->t[i];
+        if (tensor->size == 0 || tensor->off > e->weights_size ||
+            tensor->size > e->weights_size - tensor->off) {
+            fail(e, "Tensor %u points outside the Garlic weights file.", i);
+            return -1;
+        }
+        if ((e->cpu_embed && i == 0) || tensor->fmt == 7) continue;
+        if (tensor->size > matrix_cl_max_allocation(modelRuntime)) {
+            fail(e, "Tensor %u (%llu bytes) exceeds this GPU's maximum single allocation.",
+                 i, (unsigned long long)tensor->size);
+            return -1;
+        }
+        const uintptr_t host = (uintptr_t)e->model + tensor->off;
+        char error[256] = {0};
+        if (matrix_cl_register_region(modelRuntime, host, (size_t)tensor->size,
+                                       (const void*)host, error, sizeof(error)) != 0) {
+            fail(e, "Cannot upload Garlic tensor %u: %s", i,
+                 error[0] ? error : "OpenCL buffer registration failed");
+            return -1;
+        }
+    }
+
     if (e->head_idx && e->head_idx != e->n_tensors - 1) {   // the row -> token id table (trimmed lm_head)
         const Tensor* t = &e->t[e->n_tensors - 1];
         e->ids = malloc((size_t)t->rows * 4);
@@ -564,17 +613,6 @@ int engine_init(Engine* e, const char* dir, ProgressFn progress, void* user) {
     swar_tune(e);
     engine_reset(e);
 
-    char cl_error[512] = {0};
-    e->android_cl_memory = matrix_cl_create_buffer(
-        (MatrixClRuntime*)e->android_cl_runtime,
-        (size_t)e->mem_size,
-        e->mem,
-        cl_error,
-        sizeof(cl_error));
-    if (!e->android_cl_memory) {
-        fail(e, "%s", cl_error[0] ? cl_error : "Could not mirror Garlic model pool to Vulkan memory.");
-        return -1;
-    }
     return 0;
 }
 
@@ -633,13 +671,13 @@ void engine_reset(Engine* e) {
         if (!(e->full_mask >> i & 1)) {
             memset((void*)(uintptr_t)e->kc[i], 0, e->conv_n * 12);
             memset((void*)(uintptr_t)e->vc[i], 0, e->state_bytes);
-            if (e->android_cl_memory) {
-                const size_t ko = (size_t)(e->kc[i] - (uint64_t)(uintptr_t)e->mem);
-                const size_t vo = (size_t)(e->vc[i] - (uint64_t)(uintptr_t)e->mem);
-                matrix_cl_write((MatrixClRuntime*)e->android_cl_runtime, (MatrixClBuffer)e->android_cl_memory,
-                                ko, (size_t)(e->conv_n * 12), (void*)(uintptr_t)e->kc[i]);
-                matrix_cl_write((MatrixClRuntime*)e->android_cl_runtime, (MatrixClBuffer)e->android_cl_memory,
-                                vo, (size_t)e->state_bytes, (void*)(uintptr_t)e->vc[i]);
+                    if (e->android_cl_runtime) {
+                matrix_cl_write_address((MatrixClRuntime*)e->android_cl_runtime,
+                                        (uintptr_t)e->kc[i], (size_t)(e->conv_n * 12),
+                                        (void*)(uintptr_t)e->kc[i]);
+                matrix_cl_write_address((MatrixClRuntime*)e->android_cl_runtime,
+                                        (uintptr_t)e->vc[i], (size_t)e->state_bytes,
+                                        (void*)(uintptr_t)e->vc[i]);
             }
         }
     }
@@ -756,8 +794,6 @@ static void dispatch(Engine* e, const GpuKernel* k, uint64_t kargs, uint32_t gro
     size_t position = 0;
     uint32_t argument = 0;
     MatrixClRuntime* runtime = (MatrixClRuntime*)e->android_cl_runtime;
-    MatrixClBuffer root = (MatrixClBuffer)e->android_cl_memory;
-
     for (const char* type = spec; *type; ++type, ++argument) {
         int status = 0;
         if (*type == 'p') {
@@ -767,17 +803,12 @@ static void dispatch(Engine* e, const GpuKernel* k, uint64_t kargs, uint32_t gro
             position += sizeof(address);
             MatrixClBuffer buffer = NULL;
             if (address) {
-                const uint64_t base = (uint64_t)(uintptr_t)e->mem;
-                if (address < base || address - base >= e->mem_size) {
-                    fail(e, "Garlic kernel %s received a pointer outside its memory pool.", k->name);
-                    return;
-                }
-                const size_t origin = (size_t)(address - base);
-                const size_t bytes = (size_t)(e->mem_size - origin);
                 char error[256] = {0};
-                buffer = matrix_cl_subbuffer(runtime, root, origin, bytes, error, sizeof(error));
+                buffer = matrix_cl_lookup_region(runtime, (uintptr_t)address, NULL,
+                                                 error, sizeof(error));
                 if (!buffer) {
-                    fail(e, "%s", error[0] ? error : "Cannot create Garlic OpenCL buffer view.");
+                    fail(e, "Garlic kernel %s: %s", k->name,
+                         error[0] ? error : "pointer is not backed by a Vulkan buffer");
                     return;
                 }
             }
@@ -1104,8 +1135,7 @@ static int submit_go(Engine* e) {
 
 static int submit_wait(Engine* e) {
     MatrixClRuntime* runtime = (MatrixClRuntime*)e->android_cl_runtime;
-    MatrixClBuffer memory = (MatrixClBuffer)e->android_cl_memory;
-    if (!runtime || !memory) {
+    if (!runtime) {
         fail(e, "Garlic OpenCL memory pool is not ready.");
         return -1;
     }
@@ -1118,9 +1148,8 @@ static int submit_wait(Engine* e) {
         fail(e, "Vulkan/OpenCL GPU queue failed (%d).", status);
         return -1;
     }
-    const uint64_t lastOffset = (uint64_t)(uintptr_t)e->last - (uint64_t)(uintptr_t)e->mem;
-    status = matrix_cl_read(runtime, memory, (size_t)lastOffset, sizeof(uint32_t),
-                            (void*)(uintptr_t)e->last);
+        status = matrix_cl_read_address(runtime, (uintptr_t)e->last, sizeof(uint32_t),
+                                    (void*)(uintptr_t)e->last);
     if (status != 0) {
         fail(e, "Cannot read Garlic's sampled token from the GPU (%d).", status);
         return -1;
