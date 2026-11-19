@@ -70,6 +70,7 @@ void rmsnorm(global const float* x, global const float* w, global float* out, ui
     for (uint i = LID; i < n; i += 256) out[i] = x[i] * r * w[i];
 }
 
+#pragma OPENCL EXTENSION cl_khr_fp16 : enable
 typedef half half_t;
 
 // h[i] = silu(gate[i]) * up[i], with gate = gu[0..n), up = gu[n..2n).
