@@ -228,6 +228,9 @@ typedef struct {
 extern int eng_margin_mb;
 // Reads model.idx and kernels.bin from assets_dir, reserves GPU memory and loads the weights file.
 int engine_init(Engine* e, const char* assets_dir, ProgressFn progress, void* user);
+#ifdef MATRIX_ANDROID
+void engine_close(Engine* e);
+#endif
 // Runs n tokens through the model starting at position pos0 and samples the token after the last one.
 // temperature 0 = greedy. Returns 0 and the sampled token in *next, or -1 with e->error set.
 // (n >= 4 goes through the layers in batches of up to 32 tokens, shaders/prefill.h, unless e->pf_off.)
