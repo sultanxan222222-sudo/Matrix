@@ -1174,9 +1174,7 @@ class MainActivity : Activity() {
                     SecureProfileVault.setActive(this, chosen.id)
                     connectButton.isEnabled = true
                     status.text = "Выбран отдельный режим WARP\nУзел: ${chosen.name}\nЗапрашиваю разрешение Android…"
-                    val permission = VpnService.prepare(this)
-                    if (permission != null) startActivityForResult(permission, vpnPermissionRequest)
-                    else startWireGuardTunnel()
+                    requestSelectedProfileVpnPermission()
                 } catch (e: Exception) {
                     showError("Не удалось выбрать WARP-профиль", e.message ?: "Выберите другой узел.")
                 }
