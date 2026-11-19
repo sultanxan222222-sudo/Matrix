@@ -476,7 +476,7 @@ class MainActivity : Activity() {
                     wireGuardBackend.setState(matrixTunnel, State.DOWN, null)
                     tunnelUp = false
                 }
-                if (!autopilotLatch.isActive(token)) return@execute
+                if (!autopilotLatch.isActive(token)) return@connectTask
 
                 wireGuardBackend.setState(matrixTunnel, State.UP, candidate.config)
                 activeConfig = candidate.config
@@ -489,7 +489,7 @@ class MainActivity : Activity() {
                     tunnelUp = false
                     activeConfig = null
                     activeCandidateId = null
-                    return@execute
+                    return@connectTask
                 }
 
                 // Run the potentially slow HTTPS probe on a separate executor. The emergency
