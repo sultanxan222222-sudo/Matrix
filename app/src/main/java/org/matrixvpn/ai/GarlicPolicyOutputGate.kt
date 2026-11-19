@@ -17,6 +17,35 @@ object GarlicPolicyOutputGate {
         val reasonCode: String
     )
 
+    fun validateForTunnelState(
+        raw: String,
+        allowedCandidateIds: Set<String>,
+        tunnelActive: Boolean,
+        currentProfileId: String?
+    ): Advice {
+        val advice = validate(raw, allowedCandidateIds)
+        when (advice.action) {
+            Action.KEEP_CURRENT -> require(tunnelActive) {
+                "KEEP_CURRENT is invalid when MATRIX has no active tunnel."
+            }
+            Action.CONNECT_PROFILE -> require(!tunnelActive) {
+                "CONNECT_PROFILE is valid only when no VPN tunnel is active."
+            }
+            Action.PROBE_PROFILE -> require(advice.profileId != currentProfileId) {
+                "MATRIX cannot probe the profile that is already active."
+            }
+            Action.PROPOSE_FAILOVER -> {
+                require(tunnelActive) {
+                    "PROPOSE_FAILOVER is valid only when an active tunnel exists."
+                }
+                require(advice.profileId != currentProfileId) {
+                    "A failover recommendation must select a different profile."
+                }
+            }
+        }
+        return advice
+    }
+
     fun validate(raw: String, allowedCandidateIds: Set<String>): Advice {
         require(raw.length in 2..4096) { "Garlic policy response has an invalid length." }
 

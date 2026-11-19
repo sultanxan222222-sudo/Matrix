@@ -252,6 +252,11 @@ class MainActivity : Activity() {
     override fun onDestroy() {
         autoHealthCheck?.let { mainHandler.removeCallbacks(it) }
         autoHealthCheck = null
+        pendingAutoConnect = false
+        pendingAutoPermissionPrompt = false
+        pendingManualPermissionPrompt = false
+        autoConnectToken = autopilotLatch.emergencyStop()
+        manualConnectGeneration.incrementAndGet()
         garlicPolicy?.close()
         garlicPolicy = null
         vpnExecutor.shutdown()
@@ -384,11 +389,25 @@ class MainActivity : Activity() {
             autopilotLatch.emergencyStop()
             return
         }
-        val remaining = vpnCandidates.values.filter { it.id !in excludedIds }
+        val currentId = activeCandidateId
+        val remaining = vpnCandidates.values.filter {
+            it.id !in excludedIds && (!tunnelUp || it.id != currentId)
+        }
         if (remaining.isEmpty()) {
+            val preservingActive = tunnelUp && currentId != null && currentId !in excludedIds
             runOnUiThread {
-                aiStatus.text = "MATRIX AI: проверены все варианты, рабочего маршрута не найдено"
-                status.text = "VPN отключён: все доступные кандидаты не прошли проверку."
+                aiStatus.text = if (preservingActive) {
+                    "MATRIX AI: альтернатив нет; текущий VPN оставлен"
+                } else {
+                    "MATRIX AI: все разрешённые варианты исчерпаны"
+                }
+                status.text = if (preservingActive) {
+                    "Текущий VPN остаётся подключённым. Других проверенных профилей нет."
+                } else if (tunnelUp) {
+                    "Альтернативный маршрут не найден. Текущий VPN оставлен включённым для защиты трафика."
+                } else {
+                    "VPN не подключён: доступных профилей для выбора нет."
+                }
                 autoVpnButton.isEnabled = true
                 autoVpnButton.text = "MATRIX AI — повторить подбор"
             }
@@ -426,7 +445,12 @@ class MainActivity : Activity() {
                 return@whenComplete
             }
             try {
-                val advice = GarlicPolicyOutputGate.validate(raw, allowedIds)
+                val advice = GarlicPolicyOutputGate.validateForTunnelState(
+                    raw = raw,
+                    allowedCandidateIds = allowedIds,
+                    tunnelActive = tunnelUp,
+                    currentProfileId = activeCandidateId
+                )
                 if (advice.confidence < 0.60) {
                     throw IllegalArgumentException("Garlic не набрал достаточную уверенность для подключения.")
                 }
@@ -521,21 +545,27 @@ class MainActivity : Activity() {
 
                                 val previousRouteWasAlreadyFailed =
                                     previousId != null && previousId in excludedIds
-                                if (previousConfig != null && !previousRouteWasAlreadyFailed &&
-                                    autopilotLatch.isActive(token)) {
+                                val restoredPrevious = previousConfig != null &&
+                                    !previousRouteWasAlreadyFailed && autopilotLatch.isActive(token)
+                                if (restoredPrevious) {
                                     wireGuardBackend.setState(matrixTunnel, State.UP, previousConfig)
                                     activeConfig = previousConfig
                                     activeCandidateId = previousId
                                     tunnelUp = true
                                 }
+                                if (restoredPrevious && autopilotLatch.isActive(token)) {
+                                    runOnUiThread {
+                                        aiStatus.text = "MATRIX AI: тест неудачен; прежний VPN восстановлен"
+                                    }
+                                    scheduleAutoHealthCheck(token)
+                                } else if (autopilotLatch.isActive(token)) {
+                                    runOnUiThread {
+                                        aiStatus.text = "MATRIX AI: ${candidate.id} не прошёл HTTPS-проверку, выбирается следующий"
+                                    }
+                                    requestAutomaticCandidateSelection(failed, probe, token)
+                                }
                             } catch (_: Exception) {
                                 // A failed restore does not override the human-owned stop latch.
-                            }
-                            if (autopilotLatch.isActive(token)) {
-                                runOnUiThread {
-                                    aiStatus.text = "MATRIX AI: ${candidate.id} не прошёл HTTPS-проверку, выбирается следующий"
-                                }
-                                requestAutomaticCandidateSelection(failed, probe, token)
                             }
                         }
                     }
@@ -548,20 +578,24 @@ class MainActivity : Activity() {
                     activeCandidateId = null
                     val previousRouteWasAlreadyFailed =
                         previousId != null && previousId in excludedIds
-                    if (previousConfig != null && !previousRouteWasAlreadyFailed &&
-                        autopilotLatch.isActive(token)) {
+                    val restoredPrevious = previousConfig != null &&
+                        !previousRouteWasAlreadyFailed && autopilotLatch.isActive(token)
+                    if (restoredPrevious) {
                         wireGuardBackend.setState(matrixTunnel, State.UP, previousConfig)
                         activeConfig = previousConfig
                         activeCandidateId = previousId
                         tunnelUp = true
                     }
+                    val failed = excludedIds + candidate.id
+                    if (restoredPrevious && autopilotLatch.isActive(token)) {
+                        runOnUiThread { aiStatus.text = "MATRIX AI: кандидат не подключился; прежний VPN восстановлен" }
+                        scheduleAutoHealthCheck(token)
+                    } else if (autopilotLatch.isActive(token)) {
+                        runOnUiThread { aiStatus.text = "MATRIX AI: кандидат не подключился; проверяется следующий" }
+                        requestAutomaticCandidateSelection(failed, null, token)
+                    }
                 } catch (_: Exception) {
                     // Keep traffic disconnected when restore fails; the stop latch remains authoritative.
-                }
-                val failed = excludedIds + candidate.id
-                if (autopilotLatch.isActive(token)) {
-                    runOnUiThread { aiStatus.text = "MATRIX AI: кандидат не подключился; проверяется следующий" }
-                    requestAutomaticCandidateSelection(failed, null, token)
                 }
             }
         }
@@ -605,6 +639,7 @@ class MainActivity : Activity() {
         autoHealthCheck = null
         manualConnectGeneration.incrementAndGet()
         pendingAutoConnect = false
+        pendingManualPermissionPrompt = false
         // Keep pendingAutoPermissionPrompt until Android returns from its consent dialog.
         autoConnectToken = autopilotLatch.emergencyStop()
         autoVpnButton.isEnabled = true
@@ -782,6 +817,8 @@ class MainActivity : Activity() {
             } catch (e: Exception) {
                 runOnUiThread {
                     if (isFinishing || isDestroyed) return@runOnUiThread
+                    // A delayed result from an earlier run must not cancel a newer run.
+                    if (autoStart && !autopilotLatch.isActive(token)) return@runOnUiThread
                     autoVpnButton.isEnabled = true
                     connectButton.isEnabled = wireGuardConfig != null
                     status.text = "Не удалось получить варианты VPN"
@@ -790,7 +827,7 @@ class MainActivity : Activity() {
                         (e.message ?: "Сервис WARP сейчас недоступен.") +
                             "\n\nГенератор сторонний и может временно не отвечать. MATRIX не подключает непроверенные профили."
                     )
-                    if (autoStart) autopilotLatch.emergencyStop()
+                    if (autoStart && autopilotLatch.isActive(token)) autopilotLatch.emergencyStop()
                 }
             } finally {
                 connection?.disconnect()

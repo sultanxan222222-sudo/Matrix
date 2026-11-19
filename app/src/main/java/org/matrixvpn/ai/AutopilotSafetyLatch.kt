@@ -12,17 +12,21 @@ class AutopilotSafetyLatch {
     private val generation = AtomicLong(0L)
     @Volatile private var stopped = true
 
+    @Synchronized
     fun enable(): Long {
         stopped = false
         return generation.incrementAndGet()
     }
 
+    @Synchronized
     fun emergencyStop(): Long {
         stopped = true
         return generation.incrementAndGet()
     }
 
+    @Synchronized
     fun isActive(token: Long): Boolean = !stopped && generation.get() == token
 
+    @Synchronized
     fun isStopped(): Boolean = stopped
 }

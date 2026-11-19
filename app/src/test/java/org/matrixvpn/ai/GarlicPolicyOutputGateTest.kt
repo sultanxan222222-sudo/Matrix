@@ -37,6 +37,67 @@ class GarlicPolicyOutputGateTest {
         assertEquals("warp-a", advice.profileId)
     }
 
+    @Test
+    fun connectProfileRequiresNoActiveTunnel() {
+        val advice = GarlicPolicyOutputGate.validateForTunnelState(
+            """{"action":"CONNECT_PROFILE","profile_id":"warp-a","confidence":0.91,"reason_code":"NO_ACTIVE_TUNNEL"}""",
+            setOf("warp-a"),
+            tunnelActive = false,
+            currentProfileId = null
+        )
+        assertEquals(GarlicPolicyOutputGate.Action.CONNECT_PROFILE, advice.action)
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun rejectsConnectProfileWhileTunnelIsAlreadyActive() {
+        GarlicPolicyOutputGate.validateForTunnelState(
+            """{"action":"CONNECT_PROFILE","profile_id":"warp-b","confidence":0.91,"reason_code":"CONNECT"}""",
+            setOf("warp-b"),
+            tunnelActive = true,
+            currentProfileId = "warp-a"
+        )
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun rejectsFailoverWhenNoTunnelIsActive() {
+        GarlicPolicyOutputGate.validateForTunnelState(
+            """{"action":"PROPOSE_FAILOVER","profile_id":"warp-b","confidence":0.91,"reason_code":"FAILOVER"}""",
+            setOf("warp-b"),
+            tunnelActive = false,
+            currentProfileId = null
+        )
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun rejectsFailoverToTheCurrentlyActiveProfile() {
+        GarlicPolicyOutputGate.validateForTunnelState(
+            """{"action":"PROPOSE_FAILOVER","profile_id":"warp-a","confidence":0.91,"reason_code":"FAILOVER"}""",
+            setOf("warp-a"),
+            tunnelActive = true,
+            currentProfileId = "warp-a"
+        )
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun rejectsProbeOfTheCurrentlyActiveProfile() {
+        GarlicPolicyOutputGate.validateForTunnelState(
+            """{"action":"PROBE_PROFILE","profile_id":"warp-a","confidence":0.91,"reason_code":"PROBE"}""",
+            setOf("warp-a"),
+            tunnelActive = true,
+            currentProfileId = "warp-a"
+        )
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun keepCurrentRequiresAnActiveTunnel() {
+        GarlicPolicyOutputGate.validateForTunnelState(
+            """{"action":"KEEP_CURRENT","profile_id":null,"confidence":0.91,"reason_code":"KEEP"}""",
+            emptySet(),
+            tunnelActive = false,
+            currentProfileId = null
+        )
+    }
+
     @Test(expected = IllegalArgumentException::class)
     fun rejectsConnectProfileWhenTunnelHostDidNotAuthorizeCandidate() {
         GarlicPolicyOutputGate.validate(
