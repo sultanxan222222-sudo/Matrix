@@ -2,25 +2,13 @@ name: Garlic Android backend build
 
 on:
   workflow_dispatch:
-  push:
-    branches: [feature/matrix-ai-core]
-    paths:
-      - "native/garlic_android/**"
-      - "app/src/main/cpp/**"
-      - "app/src/main/java/org/matrixvpn/ai/**"
-      - "app/src/main/java/org/matrixvpn/MainActivity.kt"
-      - "third_party/garlic-llm/chat/engine.h"
-      - "third_party/garlic-llm/chat/tokenizer.c"
-      - "third_party/garlic-llm/chat/tokenizer.h"
-      - "app/build.gradle.kts"
-      - ".github/workflows/garlic-android.yml"
 
 permissions:
   contents: read
 
 concurrency:
-  group: garlic-android-${{ github.ref }}
-  cancel-in-progress: true
+  group: garlic-android-manual
+  cancel-in-progress: false
 
 jobs:
   build-garlic-android:
