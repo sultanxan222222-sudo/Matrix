@@ -198,6 +198,13 @@ def main() -> None:
     # Reuse Garlic's authoritative PMQ5 index writer and tokenizer exporter.
     export_chat.OUT = OUT_DIR
     export_chat.export_model_index_qwen35(MODEL_NAME, q4i_meta)
+    # Keep the same 2K limit compiled into Android's Qwen3.5 kernels. This is enough
+    # for the compact network-policy prompt and sharply reduces the mobile KV cache.
+    index_path = OUT_DIR / "model.idx"
+    index_bytes = bytearray(index_path.read_bytes())
+    import struct
+    struct.pack_into("<I", index_bytes, 4 + 7 * 4, 2048)
+    index_path.write_bytes(index_bytes)
     export_chat.export_tokenizer(local_model)
 
     shutil.copy2(local_model / "LICENSE", OUT_DIR / "QWEN-LICENSE")
