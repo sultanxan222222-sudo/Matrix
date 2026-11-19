@@ -4,6 +4,10 @@
 
 #include <stdint.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 // Speculative decoding with the MTP head (engine_spec.inc): the 9B app only. Not the 4B (its own MTP head is not
 // converted). Without mtp.idx or the q4s model it stays off (spec_init fails).
 #if !defined(GARLIC_4B) && !defined(MATRIX_ANDROID)
@@ -314,5 +318,9 @@ int t3_reload(Engine* e);
 // The draft length cap (0 = the head off; k < 0 keeps it); returns the old one.
 int spec_kmax(int k);
 float spec_theta(float theta);   // the draft's stop threshold (theta < 0 keeps it); returns the old one
+
+#ifdef __cplusplus
+} // extern "C"
+#endif
 
 #endif
