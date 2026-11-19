@@ -1,0 +1,62 @@
+name: Garlic Android backend build
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [feature/matrix-ai-core]
+    paths:
+      - "native/garlic_android/**"
+      - "app/src/main/cpp/**"
+      - "app/src/main/java/org/matrixvpn/ai/GarlicAndroidBackend.kt"
+      - "app/build.gradle.kts"
+      - ".github/workflows/garlic-android.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build-garlic-android:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - name: Check out MATRIX
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Install Android NDK and CMake
+        shell: bash
+        run: |
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          if [[ ! -x "$SDKMANAGER" ]]; then
+            SDKMANAGER="$(find "$ANDROID_HOME/cmdline-tools" -name sdkmanager -type f -print -quit)"
+          fi
+          test -x "$SDKMANAGER"
+          yes | "$SDKMANAGER" --licenses >/dev/null
+          "$SDKMANAGER" --install "ndk;27.2.12479018" "cmake;3.22.1" "platforms;android-35"
+
+      - name: Build clspv, compile Garlic SPIR-V, and build clvk for Android ARM64
+        shell: bash
+        env:
+          GARLIC_BUILD_JOBS: "2"
+          ANDROID_NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/27.2.12479018
+        run: bash native/garlic_android/build_garlic_android.sh
+
+      - name: Build MATRIX APK and run tests
+        run: |
+          gradle testDebugUnitTest assembleDebug
+
+      - name: Upload MATRIX APK with Garlic Android backend
+        uses: actions/upload-artifact@v4
+        with:
+          name: matrix-garlic-android-arm64-debug
+          path: |
+            app/build/outputs/apk/debug/app-debug.apk
+            app/src/main/jniLibs/arm64-v8a/libOpenCL.so
+            app/src/main/assets/garlic/*.spv
+          if-no-files-found: error
+          retention-days: 14
