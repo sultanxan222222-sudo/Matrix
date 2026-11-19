@@ -269,6 +269,12 @@ class GarlicModelPackInstaller(context: Context) {
             "Размер словаря токенизатора не совпадает с моделью."
         }
 
+        for (byte in 0 until 256) {
+            require(u32At(bytes, 12 + byte * 4) < vocabulary) {
+                "Таблица байтов токенизатора ссылается на неизвестный токен."
+            }
+        }
+
         var cursor = 12 + 256 * 4
         for (token in 0 until vocabulary.toInt()) {
             require(cursor + 3 <= bytes.size) {
