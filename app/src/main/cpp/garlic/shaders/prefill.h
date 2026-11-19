@@ -41,7 +41,7 @@ void mm_q4i_rows(global const uint4v* restrict w, global const half_t* restrict 
         float wf[32];
         for (uint k = 0; k < 4; k++) {
             uint lo = ws[k] & 0x0F0F0F0Fu, hi = (ws[k] >> 4) & 0x0F0F0F0Fu;
-            __asm__("" : "+v"(lo), "+v"(hi));
+            /* Android: remove no-op AMD register constraints */
             wf[4 * k] = (float)(lo & 0xFFu) * d + m8;
             wf[4 * k + 1] = (float)((lo >> 8) & 0xFFu) * d + m8;
             wf[4 * k + 2] = (float)((lo >> 16) & 0xFFu) * d + m8;
@@ -98,7 +98,7 @@ void mm_q3i_rows(global const uint* restrict w, global const half_t* restrict sc
         float wf[32];
         for (uint g = 0; g < 8; g++) {
             uint qq = g8[g];
-            __asm__("" : "+v"(qq));
+            /* Android: remove no-op AMD register constraint */
             wf[4 * g] = (float)(qq & 0xFFu) * d + m4;
             wf[4 * g + 1] = (float)((qq >> 8) & 0xFFu) * d + m4;
             wf[4 * g + 2] = (float)((qq >> 16) & 0xFFu) * d + m4;
@@ -161,7 +161,7 @@ void mm_q3i_rows(global const uint* restrict w, global const half_t* restrict sc
     float wf[32];                                                                \
     _Pragma("unroll") for (uint k = 0; k < 4; k++) {                             \
         uint lo = ws[k] & 0x0F0F0F0Fu, hi = (ws[k] >> 4) & 0x0F0F0F0Fu;         \
-        __asm__("" : "+v"(lo), "+v"(hi));                                        \
+        /* Android: remove no-op AMD register constraints */                                        \
         wf[4 * k] = (float)(lo & 0xFFu) * (d) + m8;                              \
         wf[4 * k + 1] = (float)((lo >> 8) & 0xFFu) * (d) + m8;                   \
         wf[4 * k + 2] = (float)((lo >> 16) & 0xFFu) * (d) + m8;                  \
@@ -213,7 +213,7 @@ void mm_q3i_rows(global const uint* restrict w, global const half_t* restrict sc
             uint ws[4] = {q.x, q.y, q.z, q.w};                                                                    \
             _Pragma("unroll") for (uint k = 0; k < 4; k++) {                                                     \
                 uint lo = ws[k] & 0x0F0F0F0Fu, hi = (ws[k] >> 4) & 0x0F0F0F0Fu;                                  \
-                __asm__("" : "+v"(lo), "+v"(hi));                                                                 \
+                /* Android: remove no-op AMD register constraints */                                                                 \
                 float a0 = (float)(lo & 0xFFu) * d + m8, a1 = (float)((lo >> 8) & 0xFFu) * d + m8;                \
                 float a2 = (float)((lo >> 16) & 0xFFu) * d + m8, a3 = (float)(lo >> 24) * d + m8;                 \
                 float c0 = (float)(hi & 0xFFu) * d + m8, c1 = (float)((hi >> 8) & 0xFFu) * d + m8;                \
@@ -244,7 +244,7 @@ void mm_q3i_rows(global const uint* restrict w, global const half_t* restrict sc
             float wf[32];                                                                                         \
             _Pragma("unroll") for (uint g = 0; g < 8; g++) {                                                     \
                 uint qq = g8[g];                                                                                  \
-                __asm__("" : "+v"(qq));                                                                           \
+                /* Android: remove no-op AMD register constraint */                                                                           \
                 wf[4 * g] = (float)(qq & 0xFFu) * d + m4;                                                         \
                 wf[4 * g + 1] = (float)((qq >> 8) & 0xFFu) * d + m4;                                              \
                 wf[4 * g + 2] = (float)((qq >> 16) & 0xFFu) * d + m4;                                             \
@@ -275,7 +275,7 @@ void mm_q3i_rows(global const uint* restrict w, global const half_t* restrict sc
             MM_Q3_GROUPS(d0, d1, d2)                                                                              \
             _Pragma("unroll") for (uint g = 0; g < 8; g++) {                                                     \
                 uint qq = g8[g];                                                                                  \
-                __asm__("" : "+v"(qq));                                                                           \
+                /* Android: remove no-op AMD register constraint */                                                                           \
                 float a0 = (float)(qq & 0xFFu) * d + m4, a1 = (float)((qq >> 8) & 0xFFu) * d + m4;                \
                 float a2 = (float)((qq >> 16) & 0xFFu) * d + m4, a3 = (float)(qq >> 24) * d + m4;                 \
                 _Pragma("unroll") for (uint v = 0; v < (R); v++) {                                               \
