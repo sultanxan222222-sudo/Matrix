@@ -577,7 +577,7 @@ class MainActivity : Activity() {
         val task = object : Runnable {
             override fun run() {
                 if (!autopilotLatch.isActive(token) || !tunnelUp) return
-                vpnExecutor.execute {
+                probeExecutor.execute {
                     if (!autopilotLatch.isActive(token) || !tunnelUp) return@execute
                     val probe = TunnelConnectivityProbe.check()
                     if (!autopilotLatch.isActive(token)) return@execute
