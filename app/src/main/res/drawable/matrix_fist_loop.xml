@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<animated-vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:drawable="@drawable/matrix_launcher">
+    <target
+        android:name="fist"
+        android:animation="@animator/matrix_fist_punch" />
+</animated-vector>

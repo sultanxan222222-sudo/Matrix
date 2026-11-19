@@ -2,154 +2,92 @@ package org.matrixvpn.network
 
 import java.net.HttpURLConnection
 import java.net.URL
-import kotlin.math.abs
-import kotlin.math.roundToInt
 
 /**
- * One end-to-end HTTPS request through Android's currently selected network route.
- * These timings are not ICMP RTT and do not directly measure UDP packet loss at a VPN peer.
+ * Checks whether an external HTTPS request succeeds while MATRIX has a tunnel active.
+ * A successful response alone does not prove the peer identity or guarantee that every
+ * app's traffic is routed through the tunnel; it is a practical connectivity signal.
  */
-internal data class HttpsProbeSample(
-    val httpCode: Int,
-    val elapsedMillis: Long,
-    val warpStatus: String?
-)
-
 data class TunnelProbeResult(
     val reachable: Boolean,
     val httpCode: Int?,
     val warpStatus: String?,
-    /** Median duration of an HTTPS request including DNS/connect/TLS and response headers. */
-    val latencyMillis: Long?,
-    val message: String,
-    val sampleCount: Int = 1,
-    val successfulSamples: Int = if (reachable) 1 else 0,
-    val probeFailurePercent: Int = if (reachable) 0 else 100,
-    /** Mean absolute change between consecutive successful HTTPS request durations. */
-    val jitterMillis: Long? = null
+    val message: String
 )
 
-internal object HttpsProbeMetrics {
-    fun summarize(
-        samples: List<HttpsProbeSample>,
-        attempts: Int,
-        lastHttpCode: Int?,
-        lastError: String?
-    ): TunnelProbeResult {
-        require(attempts > 0 && samples.size <= attempts)
-
-        val sorted = samples.map { it.elapsedMillis }.sorted()
-        val median = when {
-            sorted.isEmpty() -> null
-            sorted.size % 2 == 1 -> sorted[sorted.size / 2]
-            else -> sorted[sorted.size / 2 - 1] / 2L + sorted[sorted.size / 2] / 2L +
-                ((sorted[sorted.size / 2 - 1] % 2L + sorted[sorted.size / 2] % 2L) / 2L)
-        }
-        val changes = samples.zipWithNext { first, second ->
-            abs(second.elapsedMillis - first.elapsedMillis)
-        }
-        val jitter = changes.takeIf { it.isNotEmpty() }?.average()?.roundToInt()?.toLong()
-        val successCount = samples.size
-        val failurePercent = (((attempts - successCount) * 100.0) / attempts).roundToInt()
-        val reachable = successCount >= (attempts / 2 + 1)
-        val code = samples.lastOrNull()?.httpCode ?: lastHttpCode
-        val warp = samples.lastOrNull()?.warpStatus
-
-        val message = if (reachable) {
-            buildString {
-                append("HTTPS: ")
-                append(successCount)
-                append("/")
-                append(attempts)
-                append(" успешных; неудач ")
-                append(failurePercent)
-                append("%; медиана ")
-                append(median ?: 0L)
-                append(" мс")
-                jitter?.let {
-                    append("; вариация ")
-                    append(it)
-                    append(" мс")
-                }
-                append("; WARP=")
-                append(warp ?: "не сообщён")
-                append(".")
-            }
-        } else {
-            "Большинство HTTPS-проверок не прошло ($successCount/$attempts). " +
-                (lastError ?: "Проверьте маршрут и доступность внешнего сервиса.")
-        }
-
-        return TunnelProbeResult(
-            reachable = reachable,
-            httpCode = code,
-            warpStatus = warp,
-            latencyMillis = median,
-            message = message,
-            sampleCount = attempts,
-            successfulSamples = successCount,
-            probeFailurePercent = failurePercent,
-            jitterMillis = jitter
-        )
-    }
-}
+data class YouTubeProbeResult(
+    val reachable: Boolean,
+    val httpCode: Int?,
+    val message: String
+)
 
 object TunnelConnectivityProbe {
-    private const val SAMPLE_COUNT = 3
-    private const val CONNECT_TIMEOUT_MS = 5_000
-    private const val READ_TIMEOUT_MS = 5_000
-
     fun check(): TunnelProbeResult {
-        val successful = mutableListOf<HttpsProbeSample>()
-        var lastCode: Int? = null
-        var lastError: String? = null
-
-        repeat(SAMPLE_COUNT) { sample ->
-            var connection: HttpURLConnection? = null
-            try {
-                val url = URL("https://www.cloudflare.com/cdn-cgi/trace?matrix_probe=$sample")
-                val start = System.nanoTime()
-                connection = (url.openConnection() as HttpURLConnection).apply {
-                    requestMethod = "GET"
-                    connectTimeout = CONNECT_TIMEOUT_MS
-                    readTimeout = READ_TIMEOUT_MS
-                    instanceFollowRedirects = false
-                    useCaches = false
-                    setRequestProperty("Cache-Control", "no-cache")
-                    setRequestProperty("Pragma", "no-cache")
-                    setRequestProperty("User-Agent", "MATRIX-VPN/0.7.0")
-                }
-
-                val code = connection.responseCode
-                lastCode = code
-                val elapsed = ((System.nanoTime() - start) / 1_000_000L).coerceAtLeast(0L)
-                if (code !in 200..299) {
-                    lastError = "HTTPS вернул HTTP $code."
-                } else {
-                    val body = connection.inputStream.bufferedReader(Charsets.UTF_8).use { reader ->
-                        val output = StringBuilder()
-                        val buffer = CharArray(1024)
-                        var total = 0
-                        while (total < 32_000) {
-                            val count = reader.read(buffer, 0, minOf(buffer.size, 32_000 - total))
-                            if (count < 0) break
-                            output.append(buffer, 0, count)
-                            total += count
-                        }
-                        output.toString()
-                    }
-                    val warp = body.lineSequence()
-                        .firstOrNull { it.startsWith("warp=") }
-                        ?.substringAfter('=')
-                    successful += HttpsProbeSample(code, elapsed, warp)
-                }
-            } catch (error: Exception) {
-                lastError = error.message ?: error.javaClass.simpleName
-            } finally {
-                connection?.disconnect()
+        var connection: HttpURLConnection? = null
+        return try {
+            connection = (URL("https://www.cloudflare.com/cdn-cgi/trace").openConnection() as HttpURLConnection).apply {
+                requestMethod = "GET"
+                connectTimeout = 7_000
+                readTimeout = 7_000
+                instanceFollowRedirects = false
+                setRequestProperty("User-Agent", "MATRIX-VPN/0.1")
             }
+            val code = connection.responseCode
+            if (code !in 200..299) {
+                TunnelProbeResult(false, code, null, "Внешняя проверка HTTPS вернула код HTTP $code.")
+            } else {
+                val body = connection.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText().take(32_000) }
+                val warp = body.lineSequence().firstOrNull { it.startsWith("warp=") }?.substringAfter('=')
+                TunnelProbeResult(
+                    true,
+                    code,
+                    warp,
+                    if (warp == "on" || warp == "plus") {
+                        "Внешний HTTPS доступен; статус Cloudflare WARP: $warp."
+                    } else {
+                        "Внешний HTTPS доступен при активном туннеле. Статус Cloudflare WARP: ${warp ?: "не сообщён"}."
+                    }
+                )
+            }
+        } catch (e: Exception) {
+            TunnelProbeResult(false, null, null, "Не удалось проверить внешний HTTPS: ${e.message ?: e.javaClass.simpleName}")
+        } finally {
+            connection?.disconnect()
         }
-
-        return HttpsProbeMetrics.summarize(successful, SAMPLE_COUNT, lastCode, lastError)
     }
+    /**
+     * Tests the YouTube web endpoint from the app process while the Android VPN is active.
+     * This is a reachability diagnostic only; it does not certify video CDN throughput.
+     */
+    fun checkYouTube(): YouTubeProbeResult {
+        var connection: HttpURLConnection? = null
+        return try {
+            connection = (URL("https://www.youtube.com/generate_204").openConnection() as HttpURLConnection).apply {
+                requestMethod = "GET"
+                connectTimeout = 8_000
+                readTimeout = 8_000
+                instanceFollowRedirects = true
+                useCaches = false
+                setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android) MATRIX-VPN/0.7")
+                setRequestProperty("Accept", "*/*")
+            }
+            val code = connection.responseCode
+            val reachable = code in 200..299
+            YouTubeProbeResult(
+                reachable,
+                code,
+                if (reachable) "YouTube endpoint responded." else "YouTube endpoint returned HTTP $code."
+            )
+        } catch (error: Exception) {
+            YouTubeProbeResult(
+                false,
+                null,
+                "YouTube endpoint could not be reached: ${error.message ?: error.javaClass.simpleName}"
+            )
+        } finally {
+            connection?.disconnect()
+        }
+    }
+
+
 }

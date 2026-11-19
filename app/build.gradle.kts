@@ -5,21 +5,18 @@ plugins {
 android {
     namespace = "org.matrixvpn"
     compileSdk = 36
+    ndkVersion = "27.2.12479018"
     defaultConfig {
         applicationId = "org.matrixvpn"
         minSdk = 26
         targetSdk = 35
-        versionCode = 6
-        versionName = "0.5.1"
-        ndkVersion = "27.2.12479018"
-        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        versionCode = 16
+        versionName = "0.8.2"
         ndk { abiFilters += listOf("arm64-v8a") }
         externalNativeBuild {
-            cmake {
-                // clvk's OpenCL runtime depends on the shared Android C++ runtime.
-                arguments += listOf("-DANDROID_STL=c++_shared")
-            }
+            cmake { arguments += listOf("-DANDROID_STL=c++_shared") }
         }
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
@@ -36,11 +33,10 @@ android {
 }
 dependencies {
     implementation("androidx.core:core-ktx:1.15.0")
-    // Keep AmneziaWG/WireGuard and add an independent OpenVPN 3 engine for VPN Gate profiles.
+    // Embeddable AmneziaWG tunnel library; supports AWG configuration extensions
+    // while retaining the WireGuard Android backend/config API used by MATRIX.
     implementation("com.zaneschepke:amneziawg-android:2.3.7")
-    implementation("io.github.tim06:openvpn:1.1.3")
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.3")
     testImplementation("junit:junit:4.13.2")
-    // Use a real JSON implementation in local JVM tests instead of Android's "not mocked" stubs.
     testImplementation("org.json:json:20240303")
 }
