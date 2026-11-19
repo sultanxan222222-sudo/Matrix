@@ -5,6 +5,7 @@ on:
     branches: [feature/matrix-ai-core]
     paths:
       - "native/garlic_android/build_qwen35_model_pack.py"
+      - ".github/workflows/android.yml"
       - "third_party/garlic-llm/pc/q4.py"
       - "third_party/garlic-llm/pc/export_chat.py"
       - "third_party/garlic-llm/pc/gpu.py"
