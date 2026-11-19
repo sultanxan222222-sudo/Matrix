@@ -104,6 +104,17 @@ class MainActivity : Activity() {
             gravity = Gravity.CENTER
             setPadding(8, 8, 8, 12)
         }
+        aiStatus = TextView(this).apply {
+            text = "MATRIX AI: модель не установлена"
+            textSize = 13f
+            setTextColor(Color.rgb(130, 220, 150))
+            gravity = Gravity.CENTER
+            setPadding(8, 8, 8, 12)
+        }
+        val installAiButton = Button(this).apply {
+            text = "Установить MATRIX AI (Garlic)"
+            setOnClickListener { chooseGarlicModelPack() }
+        }
         val importButton = Button(this).apply {
             text = "2. Импорт файла с телефона"
             setOnClickListener { chooseVpnProfile() }
