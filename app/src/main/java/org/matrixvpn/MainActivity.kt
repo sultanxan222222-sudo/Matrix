@@ -112,6 +112,7 @@ class MainActivity : Activity() {
     private var pendingRecoveryReason: String? = null
     private var pendingRecoveryExcludedId: String? = null
     private var pendingRecoveryPreferredIds: List<String> = emptyList()
+    @Volatile private var pendingGarlicPermissionToken: Long? = null
     private var openVpnRunning = false
     private var openVpnState: String = MatrixVpnService.STATE_DISCONNECTED
     private var openVpnReceiverRegistered = false
@@ -650,15 +651,32 @@ class MainActivity : Activity() {
                     SecureProfileVault.setActive(this, chosen.id)
                     connectButton.isEnabled = true
                     status.text = "$mode • выбран профиль: ${chosen.name}\nЗапрашиваю разрешение Android…"
-                    val permission = VpnService.prepare(this)
-                    if (permission != null) startActivityForResult(permission, vpnPermissionRequest)
-                    else startSelectedVpnTunnel()
+                    requestSelectedProfileVpnPermission()
                 } catch (e: Exception) {
                     showError("Не удалось выбрать профиль", e.message ?: "Проверьте конфигурацию и попробуйте снова.")
                 }
             }
             .setNegativeButton("Отмена", null)
             .show()
+    }
+
+    /**
+     * Tie Android's asynchronous VPN consent result to the exact autopilot generation
+     * that selected this profile. A later emergency stop invalidates the token, so a
+     * delayed "Allow" result cannot resurrect a tunnel after the user stopped MATRIX.
+     */
+    private fun requestSelectedProfileVpnPermission() {
+        val token = garlicRunToken.takeIf { garlicProfileSelector.isActive(it) }
+        pendingGarlicPermissionToken = token
+        val permission = VpnService.prepare(this)
+        if (permission != null) {
+            startActivityForResult(permission, vpnPermissionRequest)
+        } else {
+            pendingGarlicPermissionToken = null
+            if (token == null || garlicProfileSelector.isActive(token)) {
+                startSelectedVpnTunnel()
+            }
+        }
     }
 
     private fun restoreGarlicAutopilotState() {
@@ -807,9 +825,7 @@ class MainActivity : Activity() {
             SecureProfileVault.setActive(this, chosen.id)
             connectButton.isEnabled = true
             status.text = mode + " • Garlic выбрал: " + chosen.name + "\nЗапрашиваю разрешение Android…"
-            val permission = VpnService.prepare(this)
-            if (permission != null) startActivityForResult(permission, vpnPermissionRequest)
-            else startSelectedVpnTunnel()
+            requestSelectedProfileVpnPermission()
         } catch (error: Exception) {
             showError("Garlic не смог активировать профиль", error.message ?: "Профиль не прошёл проверку.")
         }
@@ -1525,9 +1541,7 @@ class MainActivity : Activity() {
             activeProfileProvider = "VPN Gate"
             pendingOpenVpnStart = true
             SecureProfileVault.setActive(this, saved.id)
-            val permission = VpnService.prepare(this)
-            if (permission != null) startActivityForResult(permission, vpnPermissionRequest)
-            else startEmbeddedOpenVpnTunnel()
+            requestSelectedProfileVpnPermission()
         } catch (error: Exception) {
             showError("Не удалось подготовить профиль OpenVPN", error.message ?: "Профиль сервера не удалось проверить.")
         }
@@ -2334,6 +2348,15 @@ class MainActivity : Activity() {
         }
         if (requestCode == vpnPermissionRequest) {
             val recoveryReason = pendingRecoveryReason
+            val selectedProfileToken = pendingGarlicPermissionToken
+            pendingGarlicPermissionToken = null
+            if (selectedProfileToken != null && !garlicProfileSelector.isActive(selectedProfileToken)) {
+                pendingOpenVpnStart = false
+                status.text = "AI и VPN остановлены пользователем. Отложенное подключение отменено."
+                garlicStatus.text = "MATRIX AI • ОСТАНОВЛЕН • запрос подключения отменён"
+                refreshModeButtons()
+                return
+            }
             if (recoveryReason != null && !garlicProfileSelector.isActive(garlicRunToken)) {
                 pendingRecoveryReason = null
                 pendingRecoveryExcludedId = null
