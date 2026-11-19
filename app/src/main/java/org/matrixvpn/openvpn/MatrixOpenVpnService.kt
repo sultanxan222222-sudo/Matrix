@@ -290,7 +290,7 @@ class MatrixOpenVpnService : VpnService(), IOpenVPNService {
         }
     }
 
-    override fun updateState(state: ConnectionState) {
+    override fun updateStateThread(state: ConnectionState) {
         val detail = when (state) {
             ConnectionState.CONNECTED -> "OpenVPN подключён."
             ConnectionState.CONNECTING -> "OpenVPN устанавливает соединение…"
