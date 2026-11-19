@@ -54,6 +54,7 @@ class MainActivity : Activity() {
     }
     @Volatile private var activeConfig: Config? = null
     @Volatile private var activeCandidateId: String? = null
+    @Volatile private var garlicReady = false
     @Volatile private var pendingAutoConnect = false
     @Volatile private var autoConnectToken = 0L
     private val pickProfileRequest = 4102
@@ -69,7 +70,7 @@ class MainActivity : Activity() {
     }
     private val wireGuardBackend by lazy { GoBackend(applicationContext, tunnelActions) }
     private var wireGuardConfig: Config? = null
-    private var tunnelUp = false
+    @Volatile private var tunnelUp = false
 
     private val matrixTunnel = object : Tunnel {
         override fun getName(): String = "matrix"
@@ -293,12 +294,14 @@ class MainActivity : Activity() {
         policy.initialize().whenComplete { initialized, error ->
             runOnUiThread {
                 if (error != null) {
+                    garlicReady = false
                     aiStatus.text = "MATRIX AI: движок пока не готов"
                     showError(
                         "Garlic не запустился",
                         error.cause?.message ?: error.message ?: "Не удалось запустить внутренний GPU-модуль."
                     )
                 } else {
+                    garlicReady = true
                     aiStatus.text = "MATRIX AI: Garlic готов • ${initialized.deviceAbi}"
                 }
             }
