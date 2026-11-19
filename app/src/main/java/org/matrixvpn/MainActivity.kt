@@ -362,7 +362,6 @@ class MainActivity : Activity() {
             addView(modeHeading)
             addView(warpModeButton, menuButtonParams())
             addView(connectButton, menuButtonParams())
-            addView(emergencyStopButton, menuButtonParams())
         }
         val statusPanel = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -384,7 +383,6 @@ class MainActivity : Activity() {
             addView(profilesButton, menuButtonParams())
             addView(httpProxyButton, menuButtonParams())
             addView(recoveryButton, menuButtonParams())
-            addView(garlicStatus, menuButtonParams())
         }
         val menuContent = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
