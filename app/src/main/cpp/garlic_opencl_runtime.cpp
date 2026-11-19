@@ -168,6 +168,8 @@ struct MatrixClRuntime {
     uint64_t maxAllocation = 0;
     std::unordered_map<std::string, cl_kernel> kernels;
     std::unordered_map<std::string, cl_mem> subbuffers;
+    struct HostRegion { uintptr_t address; size_t size; cl_mem buffer; };
+    std::vector<HostRegion> hostRegions;
     std::vector<cl_mem> rootBuffers;
 
     ~MatrixClRuntime() {
@@ -293,6 +295,76 @@ extern "C" MatrixClBuffer matrix_cl_create_buffer(MatrixClRuntime* runtime, size
     return buffer;
 }
 
+extern "C" int matrix_cl_register_region(MatrixClRuntime* runtime, uintptr_t host_address,
+                                                   size_t size, const void* initial_data,
+                                                   char* error, size_t error_capacity) {
+    if (!runtime || host_address == 0 || size == 0 ||
+        host_address > UINTPTR_MAX - size) {
+        writeError(error, error_capacity, "Invalid Garlic host memory region.");
+        return -1;
+    }
+    for (const auto& region : runtime->hostRegions) {
+        const uintptr_t a0 = region.address;
+        const uintptr_t a1 = a0 + region.size;
+        const uintptr_t b0 = host_address;
+        const uintptr_t b1 = b0 + size;
+        if (a0 < b1 && b0 < a1) {
+            writeError(error, error_capacity, "Garlic device-memory regions overlap.");
+            return -1;
+        }
+    }
+    MatrixClBuffer buffer = matrix_cl_create_buffer(runtime, size, initial_data, error, error_capacity);
+    if (!buffer) return -1;
+    runtime->hostRegions.push_back({host_address, size, static_cast<cl_mem>(buffer)});
+    return 0;
+}
+
+extern "C" MatrixClBuffer matrix_cl_lookup_region(MatrixClRuntime* runtime, uintptr_t host_address,
+                                                    size_t* bytes_available,
+                                                    char* error, size_t error_capacity) {
+    if (!runtime || host_address == 0) return nullptr;
+    for (const auto& region : runtime->hostRegions) {
+        if (host_address < region.address) continue;
+        const uintptr_t delta = host_address - region.address;
+        if (delta >= region.size) continue;
+        const size_t available = region.size - static_cast<size_t>(delta);
+        if (bytes_available) *bytes_available = available;
+        if (delta == 0) return region.buffer;
+        return matrix_cl_subbuffer(runtime, region.buffer, static_cast<size_t>(delta), available,
+                                   error, error_capacity);
+    }
+    writeError(error, error_capacity, "Garlic kernel pointer is not part of a registered device-memory region.");
+    return nullptr;
+}
+
+extern "C" int matrix_cl_write_address(MatrixClRuntime* runtime, uintptr_t host_address,
+                                       size_t size, const void* source) {
+    if (!runtime || !source || size == 0) return -1;
+    for (const auto& region : runtime->hostRegions) {
+        if (host_address < region.address) continue;
+        const uintptr_t delta = host_address - region.address;
+        if (delta > region.size || size > region.size - static_cast<size_t>(delta)) continue;
+        const cl_int status = runtime->api->enqueueWriteBuffer(runtime->queue, region.buffer, 1,
+            static_cast<size_t>(delta), size, source, 0, nullptr, nullptr);
+        return status == CL_SUCCESS ? 0 : status;
+    }
+    return -1;
+}
+
+extern "C" int matrix_cl_read_address(MatrixClRuntime* runtime, uintptr_t host_address,
+                                      size_t size, void* destination) {
+    if (!runtime || !destination || size == 0) return -1;
+    for (const auto& region : runtime->hostRegions) {
+        if (host_address < region.address) continue;
+        const uintptr_t delta = host_address - region.address;
+        if (delta > region.size || size > region.size - static_cast<size_t>(delta)) continue;
+        const cl_int status = runtime->api->enqueueReadBuffer(runtime->queue, region.buffer, 1,
+            static_cast<size_t>(delta), size, destination, 0, nullptr, nullptr);
+        return status == CL_SUCCESS ? 0 : status;
+    }
+    return -1;
+}
+
 extern "C" MatrixClBuffer matrix_cl_subbuffer(MatrixClRuntime* runtime, MatrixClBuffer parent,
                                                 size_t origin, size_t size,
                                                 char* error, size_t error_capacity) {
@@ -301,7 +373,8 @@ extern "C" MatrixClBuffer matrix_cl_subbuffer(MatrixClRuntime* runtime, MatrixCl
         writeError(error, error_capacity, "Garlic buffer offset is not aligned for this Vulkan device.");
         return nullptr;
     }
-    const std::string key = std::to_string(origin) + ":" + std::to_string(size);
+    const std::string key = std::to_string(reinterpret_cast<uintptr_t>(parent)) + ":" +
+                            std::to_string(origin) + ":" + std::to_string(size);
     auto found = runtime->subbuffers.find(key);
     if (found != runtime->subbuffers.end()) return found->second;
 
