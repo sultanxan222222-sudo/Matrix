@@ -9,6 +9,8 @@ import android.graphics.Color
 import android.net.VpnService
 import android.net.Uri
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.text.InputType
 import android.view.Gravity
 import android.view.ViewGroup
@@ -50,6 +52,8 @@ class MainActivity : Activity() {
     private data class VpnCandidate(val id: String, val label: String, val config: Config)
     private val vpnCandidates = linkedMapOf<String, VpnCandidate>()
     private val autopilotLatch = AutopilotSafetyLatch()
+    private val mainHandler = Handler(Looper.getMainLooper())
+    private var autoHealthCheck: Runnable? = null
     private val manualConnectGeneration = AtomicLong(0L)
     private val vpnExecutor: ExecutorService = Executors.newSingleThreadExecutor { task ->
         Thread(task, "matrix-vpn-autopilot").apply { isDaemon = true }
@@ -243,6 +247,8 @@ class MainActivity : Activity() {
     }
 
     override fun onDestroy() {
+        autoHealthCheck?.let { mainHandler.removeCallbacks(it) }
+        autoHealthCheck = null
         garlicPolicy?.close()
         garlicPolicy = null
         vpnExecutor.shutdown()
@@ -430,6 +436,7 @@ class MainActivity : Activity() {
                             autoVpnButton.isEnabled = true
                             autoVpnButton.text = "MATRIX AI — автоподбор включён"
                         }
+                        scheduleAutoHealthCheck(token)
                     }
                     GarlicPolicyOutputGate.Action.CONNECT_PROFILE,
                     GarlicPolicyOutputGate.Action.PROBE_PROFILE,
@@ -502,6 +509,7 @@ class MainActivity : Activity() {
                         autoVpnButton.isEnabled = true
                         autoVpnButton.text = "MATRIX AI — автоподбор включён"
                     }
+                    scheduleAutoHealthCheck(token)
                     return@execute
                 }
 
@@ -549,10 +557,41 @@ class MainActivity : Activity() {
     }
 
     /**
+     * Re-check the active route every two minutes while the user has enabled autopilot.
+     * When a route fails, Garlic receives the failed opaque candidate ID and can choose
+     * another entry from MATRIX's currently validated candidate pool.
+     */
+    private fun scheduleAutoHealthCheck(token: Long) {
+        autoHealthCheck?.let { mainHandler.removeCallbacks(it) }
+        val task = object : Runnable {
+            override fun run() {
+                if (!autopilotLatch.isActive(token) || !tunnelUp) return
+                vpnExecutor.execute {
+                    if (!autopilotLatch.isActive(token) || !tunnelUp) return@execute
+                    val probe = TunnelConnectivityProbe.check()
+                    if (!autopilotLatch.isActive(token)) return@execute
+                    val currentId = activeCandidateId
+                    val failed = if (!probe.reachable && currentId != null) {
+                        setOf(currentId)
+                    } else {
+                        emptySet()
+                    }
+                    requestAutomaticCandidateSelection(failed, probe, token)
+                }
+                mainHandler.postDelayed(this, 120_000L)
+            }
+        }
+        autoHealthCheck = task
+        mainHandler.postDelayed(task, 120_000L)
+    }
+
+    /**
      * Human-owned kill control. It invalidates all pending Garlic decisions first,
      * then serially stops the tunnel after any in-flight backend call completes.
      */
     private fun emergencyStopVpn() {
+        autoHealthCheck?.let { mainHandler.removeCallbacks(it) }
+        autoHealthCheck = null
         manualConnectGeneration.incrementAndGet()
         pendingAutoConnect = false
         // Keep pendingAutoPermissionPrompt until Android returns from its consent dialog.
