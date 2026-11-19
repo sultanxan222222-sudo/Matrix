@@ -21,6 +21,7 @@ import com.tim.openvpn.service.IOpenVPNService
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
+import java.net.InetAddress
 
 /**
  * OpenVPN 3 adapter that maps the upstream TunBuilder callbacks onto Android VpnService.
@@ -212,7 +213,7 @@ class MatrixOpenVpnService : VpnService(), IOpenVPNService {
         requireNotNull(route) { "OpenVPN передал пустой маршрут IPv4." }
         val target = builder()
         if (include) {
-            target.addRoute(route.ip, route.len)
+            target.addRoute(InetAddress.getByName(route.ip), route.len)
         } else if (Build.VERSION.SDK_INT >= 33) {
             target.excludeRoute(android.net.IpPrefix(route.ip, route.len))
         }
@@ -223,7 +224,7 @@ class MatrixOpenVpnService : VpnService(), IOpenVPNService {
     override fun addRoute(dest: String?, mask: String?, gateway: String?, device: String?) {
         require(!dest.isNullOrBlank() && !mask.isNullOrBlank()) { "OpenVPN передал неполный маршрут IPv4." }
         val prefix = OpenVpnRouteParser.ipv4PrefixFromNetmask(mask)
-        builder().addRoute(dest, prefix)
+        builder().addRoute(InetAddress.getByName(dest), prefix)
     }
 
     override fun addRoutev6(ip: String?, device: String?) {
@@ -256,13 +257,13 @@ class MatrixOpenVpnService : VpnService(), IOpenVPNService {
 
     override fun setLocalIP(cidrip: CIDRIP?) {
         requireNotNull(cidrip) { "OpenVPN передал пустой IPv4-адрес." }
-        builder().addAddress(cidrip.ip, cidrip.len)
+        builder().addAddress(InetAddress.getByName(cidrip.ip), cidrip.len)
     }
 
     override fun setLocalIPv6(ipv6addr: String?) {
         require(!ipv6addr.isNullOrBlank()) { "OpenVPN передал пустой IPv6-адрес." }
         val (address, prefix) = OpenVpnRouteParser.parseCidr(ipv6addr)
-        builder().addAddress(address, prefix)
+        builder().addAddress(InetAddress.getByName(address), prefix)
     }
 
     override fun protectFd(fd: Int): Boolean = protect(fd)
@@ -289,7 +290,7 @@ class MatrixOpenVpnService : VpnService(), IOpenVPNService {
         }
     }
 
-    override fun updateState(state: ConnectionState) {
+    override fun updateStateThread(state: ConnectionState) {
         val detail = when (state) {
             ConnectionState.CONNECTED -> "OpenVPN подключён."
             ConnectionState.CONNECTING -> "OpenVPN устанавливает соединение…"
@@ -297,9 +298,8 @@ class MatrixOpenVpnService : VpnService(), IOpenVPNService {
             ConnectionState.DISCONNECTED -> "OpenVPN отключён или потерял соединение."
             ConnectionState.READYFORCONNECT -> "OpenVPN готов к подключению."
             ConnectionState.PERMISSION_NOT_GRANTED -> "Android не предоставил разрешение VPN."
-            ConnectionState.NO_INTERNET -> "Нет доступа к интернету."
-            ConnectionState.LOADING -> "Загрузка OpenVPN…"
             ConnectionState.IDLE -> "OpenVPN ожидает."
+            else -> "Состояние OpenVPN: $state"
         }
         MatrixOpenVpnRuntime.publish(state, detail)
     }
