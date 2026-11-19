@@ -390,6 +390,11 @@ int engine_init(Engine* e, const char* dir, ProgressFn progress, void* user) {
             rope[(uint64_t)p * e->rope_dim + i] = (float)cos(ang);
             rope[(uint64_t)p * e->rope_dim + half + i] = (float)sin(ang);
         }
+    if (matrix_cl_write_address((MatrixClRuntime*)e->android_cl_runtime, (uintptr_t)rope,
+                                (size_t)e->max_seq * e->rope_dim * sizeof(float), rope) != 0) {
+        fail(e, "Could not upload Garlic RoPE table to Vulkan memory.");
+        return -1;
+    }
 
     if (e->head_dim != (e->qwen35 ? 256u : 128u) || e->n_heads / e->n_kv > 4 || e->max_seq % ATT_BLOCK) {
         fail(e, "model shape not supported by the kernels (max_seq %u, head_dim %u)", e->max_seq, e->head_dim);
@@ -640,19 +645,11 @@ static int fetch_row(Engine* e, uint32_t tok, float* dst) {
             dst[b * 32 + 16 + j] = ((float)(q[j] >> 4) - 8.0f) * d;
         }
     }
-    if (e->android_cl_memory) {
-        const uint64_t address = (uint64_t)(uintptr_t)dst;
-        const uint64_t base = (uint64_t)(uintptr_t)e->mem;
-        if (address >= base && address - base < e->mem_size) {
-            const size_t offset = (size_t)(address - base);
-            const int status = matrix_cl_write((MatrixClRuntime*)e->android_cl_runtime,
-                                                (MatrixClBuffer)e->android_cl_memory,
-                                                offset, (size_t)cols * sizeof(float), dst);
-            if (status != 0) {
-                fail(e, "Could not upload CPU embedding row to the GPU (%d).", status);
-                return -1;
-            }
-        }
+    const int uploadStatus = matrix_cl_write_address((MatrixClRuntime*)e->android_cl_runtime,
+                                                       (uintptr_t)dst, (size_t)cols * sizeof(float), dst);
+    if (uploadStatus != 0) {
+        fail(e, "Could not upload CPU embedding row to the GPU (%d).", uploadStatus);
+        return -1;
     }
     return 0;
 }
@@ -780,7 +777,7 @@ static uint64_t args_v(Engine* e, const char* spec, ...) {
     (sizeof(char[sizeof(spec) - 1 == NARGS(__VA_ARGS__) ? 1 : -1]) ? args_v(e, spec, __VA_ARGS__) : 0)
 
 static void dispatch(Engine* e, const GpuKernel* k, uint64_t kargs, uint32_t groups, uint32_t threads) {
-    if (!k || !k->android_handle || !e->android_cl_runtime || !e->android_cl_memory ||
+    if (!k || !k->android_handle || !e->android_cl_runtime ||
         groups == 0 || threads == 0) {
         fail(e, "Invalid Garlic OpenCL dispatch.");
         return;
@@ -1139,7 +1136,6 @@ static int submit_wait(Engine* e) {
         fail(e, "Garlic OpenCL memory pool is not ready.");
         return -1;
     }
-    const struct timespec start = {0};
     struct timespec before, after;
     clock_gettime(CLOCK_MONOTONIC, &before);
     int status = matrix_cl_finish(runtime);
@@ -1148,7 +1144,7 @@ static int submit_wait(Engine* e) {
         fail(e, "Vulkan/OpenCL GPU queue failed (%d).", status);
         return -1;
     }
-        status = matrix_cl_read_address(runtime, (uintptr_t)e->last, sizeof(uint32_t),
+    status = matrix_cl_read_address(runtime, (uintptr_t)e->last, sizeof(uint32_t),
                                     (void*)(uintptr_t)e->last);
     if (status != 0) {
         fail(e, "Cannot read Garlic's sampled token from the GPU (%d).", status);
