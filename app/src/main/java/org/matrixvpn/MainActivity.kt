@@ -57,7 +57,7 @@ class MainActivity : Activity() {
         val httpCode: Int?,
         val checkedAtMillis: Long
     )
-    private val vpnCandidates = linkedMapOf<String, VpnCandidate>()
+    private val vpnCandidates = ConcurrentHashMap<String, VpnCandidate>()
     private val candidateHealth = ConcurrentHashMap<String, CandidateHealth>()
     private val autopilotLatch = AutopilotSafetyLatch()
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -426,16 +426,26 @@ class MainActivity : Activity() {
         val allowedIds = remaining.map { it.id }.toSet()
         val candidateJson = JSONArray().apply { remaining.forEach { put(it.id) } }
         val excludedJson = JSONArray().apply { excludedIds.forEach { put(it) } }
+        val now = System.currentTimeMillis()
         val healthJson = JSONArray().apply {
-            val now = System.currentTimeMillis()
-            candidateHealth.forEach { (id, health) ->
+            remaining.forEach { candidate ->
+                val health = candidateHealth[candidate.id] ?: return@forEach
                 put(
                     JSONObject()
-                        .put("profile_id", id)
+                        .put("profile_id", candidate.id)
                         .put("reachable", health.reachable)
                         .put("rtt_ms", health.latencyMillis ?: JSONObject.NULL)
                         .put("http_status", health.httpCode ?: JSONObject.NULL)
                         .put("age_seconds", ((now - health.checkedAtMillis).coerceAtLeast(0L) / 1000L))
+                )
+            }
+        }
+        val descriptorJson = JSONArray().apply {
+            remaining.forEach { candidate ->
+                put(
+                    JSONObject()
+                        .put("profile_id", candidate.id)
+                        .put("label", candidate.label.take(160))
                 )
             }
         }
@@ -451,6 +461,7 @@ class MainActivity : Activity() {
             .put("external_http_status", lastProbe?.httpCode ?: JSONObject.NULL)
             .put("candidate_count", remaining.size)
             .put("candidate_profile_ids", candidateJson)
+            .put("candidate_descriptors", descriptorJson)
             .put("candidate_health", healthJson)
             .put("failed_profile_ids", excludedJson)
             .toString()
