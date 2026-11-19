@@ -6,7 +6,7 @@
 
 // Speculative decoding with the MTP head (engine_spec.inc): the 9B app only. Not the 4B (its own MTP head is not
 // converted). Without mtp.idx or the q4s model it stays off (spec_init fails).
-#if !defined(GARLIC_4B)
+#if !defined(GARLIC_4B) && !defined(MATRIX_ANDROID)
 #define GARLIC_SPEC 1
 #endif
 
@@ -14,6 +14,9 @@ typedef struct {
     char name[32];
     uint64_t addr;
     uint32_t rsrc1, rsrc2, user_sgprs, kernarg_sgpr;
+#ifdef MATRIX_ANDROID
+    void* android_handle;
+#endif
 } GpuKernel;
 
 typedef struct {
@@ -222,6 +225,10 @@ typedef struct {
     Asr asr;
     T3 t3;
     S3G s3;
+#ifdef MATRIX_ANDROID
+    void* android_cl_runtime;
+    void* android_cl_memory;
+#endif
 } Engine;
 
 // Direct memory engine_init leaves to the system (MiB; main.c sets it before engine_init).
