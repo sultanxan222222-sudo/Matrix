@@ -704,7 +704,7 @@ class MainActivity : Activity() {
                 garlicStatus.text = if (error == null && result?.ready == true) {
                     "MATRIX AI • GARLIC ONLINE • " + result.deviceAbi
                 } else {
-                    garlicStatus.text = "MATRIX AI • Garlic недоступен на этом устройстве"
+                    "MATRIX AI • Garlic недоступен на этом устройстве"
                 }
             }
         }
