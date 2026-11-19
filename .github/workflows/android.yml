@@ -21,10 +21,10 @@ jobs:
           gradle-version: '8.13'
       - name: Build and run unit tests
         run: gradle testDebugUnitTest assembleDebug
-      # Feature branches compile and test continuously, but do not publish
-      # interim APKs. Only the main branch publishes a downloadable artifact.
+      # Publish a debug APK from the dedicated MATRIX development branch for
+      # direct device testing. The main branch keeps its release-candidate artifact.
       - name: Upload release-candidate debug APK
-        if: github.ref == 'refs/heads/main'
+        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/feature/matrix-ai-core'
         uses: actions/upload-artifact@v4
         with:
           name: matrix-vpn-debug-apk
