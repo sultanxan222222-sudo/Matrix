@@ -93,15 +93,16 @@ class GarlicMatrixPolicy(
 
     override fun close() {
         if (!closed.compareAndSet(false, true)) return
+        // Do not block Android's UI thread while a model token is being computed.
+        // The single-thread executor drains any in-flight assessment before closing JNI.
         try {
-            executor.submit {
+            executor.execute {
                 val handle = nativeHandle
                 nativeHandle = 0L
                 if (handle != 0L) nativeClose(handle)
-            }.get(20, java.util.concurrent.TimeUnit.SECONDS)
-        } catch (_: Exception) {
-            // Process shutdown is already underway; no further model requests are accepted.
-        } finally {
+            }
+            executor.shutdown()
+        } catch (_: RuntimeException) {
             executor.shutdownNow()
         }
     }
