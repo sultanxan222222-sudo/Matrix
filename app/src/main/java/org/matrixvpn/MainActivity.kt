@@ -519,7 +519,8 @@ class MainActivity : Activity() {
                 activeCandidateId = null
 
                 // Restore the last known-good tunnel before asking Garlic for another candidate.
-                if (previousConfig != null && autopilotLatch.isActive(token)) {
+                val previousRouteWasAlreadyFailed = previousId != null && previousId in excludedIds
+                if (previousConfig != null && !previousRouteWasAlreadyFailed && autopilotLatch.isActive(token)) {
                     wireGuardBackend.setState(matrixTunnel, State.UP, previousConfig)
                     activeConfig = previousConfig
                     activeCandidateId = previousId
@@ -538,7 +539,8 @@ class MainActivity : Activity() {
                     tunnelUp = false
                     activeConfig = null
                     activeCandidateId = null
-                    if (previousConfig != null && autopilotLatch.isActive(token)) {
+                    val previousRouteWasAlreadyFailed = previousId != null && previousId in excludedIds
+                    if (previousConfig != null && !previousRouteWasAlreadyFailed && autopilotLatch.isActive(token)) {
                         wireGuardBackend.setState(matrixTunnel, State.UP, previousConfig)
                         activeConfig = previousConfig
                         activeCandidateId = previousId
@@ -1041,7 +1043,7 @@ class MainActivity : Activity() {
                 if (manualConnectGeneration.get() != generation) return@execute
                 wireGuardBackend.setState(matrixTunnel, State.UP, config)
                 activeConfig = config
-                activeCandidateId = null
+                activeCandidateId = vpnCandidates.values.firstOrNull { it.config === config }?.id
                 tunnelUp = true
                 if (manualConnectGeneration.get() != generation) {
                     wireGuardBackend.setState(matrixTunnel, State.DOWN, null)
