@@ -214,9 +214,11 @@ class MainActivity : Activity() {
     }
 
     private fun chooseGarlicModelPack() {
+        // OEM document providers sometimes mislabel downloaded ZIP archives.
+        // Use the unrestricted SAF picker; the installer validates the archive contents.
         val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
             addCategory(Intent.CATEGORY_OPENABLE)
-            type = "application/zip"
+            type = "*/*"
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
         try {
