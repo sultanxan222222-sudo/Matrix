@@ -2057,6 +2057,11 @@ class MainActivity : Activity() {
                                 val probe = TunnelConnectivityProbe.check()
                                 val latency = (SystemClock.elapsedRealtime() - started).coerceAtLeast(1L)
                                 NodeHealthStore.record(this, candidate.id, probe.reachable, latency)
+                                if (!garlicProfileSelector.isActive(recoveryToken)) {
+                                    attempts.add("Аварийная остановка нажата во время проверки WireGuard; завершаю остановку.")
+                                    stopWireGuardAndWait()
+                                    break
+                                }
                                 attempts.add("${candidate.name} • AmneziaWG/WireGuard")
                                 if (probe.reachable) {
                                     selectedProfile = candidate
@@ -2080,6 +2085,12 @@ class MainActivity : Activity() {
                                 val pass = if (candidate.provider.equals("VPN Gate", true)) "vpn" else ""
                                 MatrixVpnService.start(this, raw, user, pass)
                                 val connected = waitForOpenVpnConnected(45_000L)
+                                if (!garlicProfileSelector.isActive(recoveryToken)) {
+                                    attempts.add("Аварийная остановка нажата во время запуска OpenVPN; завершаю остановку.")
+                                    stopOpenVpnAndWait()
+                                    stopWireGuardAndWait()
+                                    break
+                                }
                                 if (connected) {
                                     Thread.sleep(1_000L)
                                     val started = SystemClock.elapsedRealtime()
@@ -2116,6 +2127,16 @@ class MainActivity : Activity() {
                 attempts.add("Ошибка восстановления: ${error.message ?: error.javaClass.simpleName}")
             }
 
+            if (!garlicProfileSelector.isActive(recoveryToken)) {
+                // A stop can arrive while a backend connect/probe is already in flight.
+                // Reassert DOWN after that operation returns and discard its candidate.
+                stopOpenVpnAndWait()
+                stopWireGuardAndWait()
+                selectedProfile = null
+                selectedRaw = null
+                selectedConfig = null
+                selectedEngine = ""
+            }
             val recovered = selectedProfile != null
             if (!recovered) {
                 stopOpenVpnAndWait()
