@@ -385,7 +385,6 @@ class MainActivity : Activity() {
             addView(httpProxyButton, menuButtonParams())
             addView(recoveryButton, menuButtonParams())
             addView(garlicStatus, menuButtonParams())
-            addView(installGarlicButton, menuButtonParams())
         }
         val menuContent = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -695,22 +694,17 @@ class MainActivity : Activity() {
     }
 
     private fun initializeInstalledGarlicModel() {
+        // Garlic's complete Qwen3.5 model is bundled in the APK. The native
+        // loader copies the verified build assets into app-private storage.
         val directory = File(filesDir, "models/garlic")
-        val names = listOf(
-            "model.idx", "tokenizer.bin", "qwen3.5-0.8b-q4i.bin",
-            "qwen3.5-0.8b-q4i.json", "QWEN-LICENSE", "SHA256SUMS.json"
-        )
-        if (!names.all { File(directory, it).isFile }) {
-            garlicStatus.text = "MATRIX AI • установите пакет Garlic Qwen3.5"
-            return
-        }
+        garlicStatus.text = "MATRIX AI • загрузка встроенной модели Garlic…"
         garlicProfileSelector.initialize(directory).whenComplete { result, error ->
             runOnUiThread {
                 if (isFinishing || isDestroyed) return@runOnUiThread
                 garlicStatus.text = if (error == null && result?.ready == true) {
                     "MATRIX AI • GARLIC ONLINE • " + result.deviceAbi
                 } else {
-                    "MATRIX AI • Garlic не запустился на этом устройстве"
+                    garlicStatus.text = "MATRIX AI • Garlic недоступен на этом устройстве"
                 }
             }
         }
