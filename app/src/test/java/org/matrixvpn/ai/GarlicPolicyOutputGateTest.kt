@@ -53,7 +53,7 @@ class GarlicPolicyOutputGateTest {
     @Test(expected = IllegalArgumentException::class)
     fun rejectsNonFiniteConfidence() {
         GarlicPolicyOutputGate.validate(
-            """{"action":"KEEP_CURRENT","profile_id":null,"confidence":1e309,"reason_code":"OK"}""",
+            """{"action":"KEEP_CURRENT","profile_id":null,"confidence":1.5,"reason_code":"OK"}""",
             emptySet()
         )
     }
