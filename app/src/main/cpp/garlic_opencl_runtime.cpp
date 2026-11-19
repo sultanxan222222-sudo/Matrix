@@ -169,6 +169,17 @@ struct MatrixClRuntime {
     std::unordered_map<std::string, cl_kernel> kernels;
     std::unordered_map<uint64_t, cl_mem> subbuffers;
     std::vector<cl_mem> rootBuffers;
+
+    ~MatrixClRuntime() {
+        if (!api) return;
+        if (queue) api->finish(queue);
+        for (auto& item : kernels) if (item.second) api->releaseKernel(item.second);
+        for (auto& item : subbuffers) if (item.second) api->releaseMemObject(item.second);
+        for (cl_mem buffer : rootBuffers) if (buffer) api->releaseMemObject(buffer);
+        if (program) api->releaseProgram(program);
+        if (queue) api->releaseCommandQueue(queue);
+        if (context) api->releaseContext(context);
+    }
 };
 
 extern "C" MatrixClRuntime* matrix_cl_create(const void* spirv, size_t spirv_size,
@@ -259,16 +270,6 @@ extern "C" MatrixClRuntime* matrix_cl_create(const void* spirv, size_t spirv_siz
 }
 
 extern "C" void matrix_cl_destroy(MatrixClRuntime* runtime) {
-    if (!runtime) return;
-    if (runtime->api) {
-        for (auto& item : runtime->kernels) if (item.second) runtime->api->releaseKernel(item.second);
-        for (auto& item : runtime->subbuffers) if (item.second) runtime->api->releaseMemObject(item.second);
-        for (cl_mem buffer : runtime->rootBuffers) if (buffer) runtime->api->releaseMemObject(buffer);
-        if (runtime->program) runtime->api->releaseProgram(runtime->program);
-        if (runtime->queue) runtime->api->releaseCommandQueue(runtime->queue);
-        if (runtime->context) runtime->api->releaseContext(runtime->context);
-        runtime->api->finish(runtime->queue);
-    }
     delete runtime;
 }
 
