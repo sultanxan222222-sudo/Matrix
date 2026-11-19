@@ -184,10 +184,14 @@ std::string evaluateLocked(MatrixAgent* agent, const std::string& observation) {
         "You are the internal network policy engine of MATRIX VPN. "
         "You are not a chat assistant. Analyse the JSON network observation and return exactly one "
         "JSON object with fields action, profile_id, confidence, reason_code. "
-        "action must be KEEP_CURRENT, PROBE_PROFILE, or PROPOSE_FAILOVER. "
-        "KEEP_CURRENT requires profile_id null. Other actions must use exactly one ID from candidate_profile_ids. "
-        "Never invent an ID. If evidence is insufficient, use KEEP_CURRENT. "
-        "Never request secrets or change a kill switch, firewall, DNS security, or tunnel protection. "
+        "action must be CONNECT_PROFILE, KEEP_CURRENT, PROBE_PROFILE, or PROPOSE_FAILOVER. "
+        "When tunnel_active is false and candidates exist, choose CONNECT_PROFILE with one candidate ID. "
+        "When the active tunnel is healthy, choose KEEP_CURRENT with profile_id null. "
+        "When the active tunnel is unhealthy, choose PROPOSE_FAILOVER with one candidate ID. "
+        "Use PROBE_PROFILE only to test a candidate that MATRIX has explicitly listed. "
+        "KEEP_CURRENT requires profile_id null. All other actions require exactly one ID from candidate_profile_ids. "
+        "Never invent an ID. If no candidates exist, use KEEP_CURRENT. "
+        "Never request secrets or change the human emergency stop, firewall, DNS security, or tunnel protection. "
         "Output no Markdown and no explanation outside the JSON object.\n";
 
     std::vector<uint32_t> prompt;
