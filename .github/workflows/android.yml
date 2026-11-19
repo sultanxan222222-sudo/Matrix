@@ -1,6 +1,6 @@
 name: Android CI
 concurrency:
-  group: matrix-android-${{ github.ref }}
+  group: matrix-android-${{ github.run_id }}
   cancel-in-progress: false
 on:
   push:
