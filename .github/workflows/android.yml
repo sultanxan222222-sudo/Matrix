@@ -66,6 +66,31 @@ jobs:
           export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/27.2.12479018"
           bash native/garlic_android/build_garlic_android.sh
 
+      # Build the official Qwen3.5 checkpoint into Garlic's native Q4i format
+      # and bundle the complete model into this single APK.
+      - name: Build and bundle Garlic Qwen3.5 model weights
+        env:
+          MATRIX_QWEN_MODEL: Qwen/Qwen3.5-0.8B
+          MATRIX_MODEL_OUTPUT: ${{ github.workspace }}/build/matrix-qwen35-0.8b
+          MATRIX_MODEL_WORK: ${{ runner.temp }}/qwen35-work
+        run: |
+          set -euxo pipefail
+          python3 -m pip install --upgrade pip
+          python3 -m pip install "numpy<2" safetensors huggingface_hub
+          python3 -m pip install torch==2.6.0 --index-url https://download.pytorch.org/whl/cpu
+          python3 native/garlic_android/build_qwen35_model_pack.py
+          mkdir -p app/src/main/assets/garlic
+          cp build/matrix-qwen35-0.8b/model.idx app/src/main/assets/garlic/model.idx
+          cp build/matrix-qwen35-0.8b/tokenizer.bin app/src/main/assets/garlic/tokenizer.bin
+          cp build/matrix-qwen35-0.8b/qwen3.5-0.8b-q4i.bin app/src/main/assets/garlic/qwen3.5-0.8b-q4i.bin
+          cp build/matrix-qwen35-0.8b/qwen3.5-0.8b-q4i.json app/src/main/assets/garlic/qwen3.5-0.8b-q4i.json
+          cp build/matrix-qwen35-0.8b/QWEN-LICENSE app/src/main/assets/garlic/QWEN-LICENSE
+          cp build/matrix-qwen35-0.8b/MODEL-INFO.txt app/src/main/assets/garlic/MODEL-INFO.txt
+          cp build/matrix-qwen35-0.8b/SHA256SUMS.json app/src/main/assets/garlic/SHA256SUMS.json
+          test -s app/src/main/assets/garlic/model.idx
+          test -s app/src/main/assets/garlic/tokenizer.bin
+          test -s app/src/main/assets/garlic/qwen3.5-0.8b-q4i.bin
+
       - name: Build embedded OpenVPN 3 Core for ARM64
         env:
           ANDROID_PLATFORM: android-26
