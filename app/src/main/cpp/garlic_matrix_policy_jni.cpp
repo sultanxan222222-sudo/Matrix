@@ -295,6 +295,8 @@ Java_org_matrixvpn_ai_GarlicMatrixPolicy_nativeCreate(JNIEnv* env, jobject,
     std::string error;
     const std::string shaderPath = directory + "/qwen35.spv";
     const std::string tokenizerPath = directory + "/tokenizer.bin";
+    const std::string modelIndexPath = directory + "/model.idx";
+    const std::string weightsPath = directory + "/qwen3.5-0.8b-q4i.bin";
     if (access(shaderPath.c_str(), R_OK) != 0 &&
         !copyAsset(assets, "garlic/qwen35.spv", shaderPath, &error)) {
         logError(error.c_str());
@@ -303,6 +305,22 @@ Java_org_matrixvpn_ai_GarlicMatrixPolicy_nativeCreate(JNIEnv* env, jobject,
     }
     if (access(tokenizerPath.c_str(), R_OK) != 0 &&
         !copyAsset(assets, "garlic/tokenizer.bin", tokenizerPath, &error)) {
+        logError(error.c_str());
+        delete agent;
+        return 0;
+    }
+
+    // The official model weights, PMQ5 index and tokenizer are packaged inside
+    // the APK. Copy them to app-private storage on first launch; no external ZIP
+    // download or user-selected model file is required.
+    if (access(modelIndexPath.c_str(), R_OK) != 0 &&
+        !copyAsset(assets, "garlic/model.idx", modelIndexPath, &error)) {
+        logError(error.c_str());
+        delete agent;
+        return 0;
+    }
+    if (access(weightsPath.c_str(), R_OK) != 0 &&
+        !copyAsset(assets, "garlic/qwen3.5-0.8b-q4i.bin", weightsPath, &error)) {
         logError(error.c_str());
         delete agent;
         return 0;
@@ -325,7 +343,7 @@ Java_org_matrixvpn_ai_GarlicMatrixPolicy_nativeCreate(JNIEnv* env, jobject,
     agent->tokenizerReady = true;
 
     const std::string modelIndex = directory + "/model.idx";
-    if (access(modelIndex.c_str(), R_OK) != 0) {
+    if (access(modelIndex.c_str(), R_OK) != 0 || access(weightsPath.c_str(), R_OK) != 0) {
         logError("The installed model pack is missing model.idx.");
         freeTokenizer(&agent->tokenizer);
         delete agent;
