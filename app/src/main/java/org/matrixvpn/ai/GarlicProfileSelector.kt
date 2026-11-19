@@ -161,7 +161,7 @@ class GarlicProfileSelector(context: Context) : Closeable {
     }
 
     override fun close() {
-        emergencyStop()
+        latch.emergencyStop()
         val old = policy
         policy = null
         isReady = false
