@@ -10,6 +10,7 @@ MATRIX's Garlic-first Android compute port combines the following upstream compo
 | OpenCL-Headers | OpenCL API headers | Apache-2.0 | https://github.com/KhronosGroup/OpenCL-Headers |
 | SPIRV-Headers | SPIR-V headers and grammar | Apache-2.0 | https://github.com/KhronosGroup/SPIRV-Headers |
 | SPIRV-Tools | SPIR-V validation and toolchain support | Apache-2.0 | https://github.com/KhronosGroup/SPIRV-Tools |
+| SPIRV-LLVM-Translator | Pinned host-side SPIR-V translation tools consumed by clvk's dependency tree | Apache-2.0 | https://github.com/KhronosGroup/SPIRV-LLVM-Translator |
 
 The CLVK build also consumes the SPIRV-LLVM-Translator and LLVM/Clang/libclc source revisions pinned by its submodules/dependency manifest. Their original notices remain in the fetched source trees used for the build; the distributable notice bundle must be refreshed if the pinned dependency set changes.
 
