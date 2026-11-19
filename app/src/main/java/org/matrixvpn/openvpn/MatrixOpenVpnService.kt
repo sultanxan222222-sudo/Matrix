@@ -215,7 +215,7 @@ class MatrixOpenVpnService : VpnService(), IOpenVPNService {
         if (include) {
             target.addRoute(InetAddress.getByName(route.ip), route.len)
         } else if (Build.VERSION.SDK_INT >= 33) {
-            target.excludeRoute(android.net.IpPrefix(route.ip, route.len))
+            target.excludeRoute(android.net.IpPrefix(InetAddress.getByName(route.ip), route.len))
         }
         // Android < 13 has no excludeRoute API. Omitting an exclusion preserves the
         // full-tunnel safety model; the local subnet may be unavailable on older OS releases.
@@ -232,7 +232,7 @@ class MatrixOpenVpnService : VpnService(), IOpenVPNService {
         val (address, prefix) = OpenVpnRouteParser.parseCidr(ip)
         val target = builder()
         if (device == "wifi0" && Build.VERSION.SDK_INT >= 33) {
-            target.excludeRoute(android.net.IpPrefix(address, prefix))
+            target.excludeRoute(android.net.IpPrefix(InetAddress.getByName(address), prefix))
         } else if (device != "wifi0") {
             target.addRoute(address, prefix)
         }
