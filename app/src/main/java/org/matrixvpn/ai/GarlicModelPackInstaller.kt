@@ -264,9 +264,11 @@ class GarlicModelPackInstaller(context: Context) {
 
         val vocabulary = u32(4)
         val merges = u32(8)
-        require(vocabulary == expectedVocabulary && vocabulary in 256..1_000_000 &&
-            merges in 1..10_000_000) {
-            "Размер словаря токенизатора не совпадает с моделью."
+        // Qwen's output projection is padded to 248,320 rows, while the tokenizer
+        // stores only actual IDs (248,070). The final padded rows are not valid tokens.
+        require(vocabulary in 256..1_000_000 && expectedVocabulary >= vocabulary &&
+            expectedVocabulary - vocabulary <= 1024L && merges in 1..10_000_000) {
+            "Размер словаря токенизатора не согласован с матрицей выходных весов."
         }
 
         for (byte in 0 until 256) {
