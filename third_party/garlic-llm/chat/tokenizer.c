@@ -13,41 +13,116 @@
 #include <stdlib.h>
 #include <string.h>
 
-static uint32_t rd32(const uint8_t* p) { return p[0] | p[1] << 8 | p[2] << 16 | (uint32_t)p[3] << 24; }
+static uint32_t rd32(const uint8_t* p) {
+    return (uint32_t)p[0] | ((uint32_t)p[1] << 8) |
+           ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
+}
+
+static void tok_clear(Tokenizer* t) {
+    if (!t) return;
+    free(t->raw);
+    free(t->raw_len);
+    free(t->special);
+    free(t->keys);
+    free(t->rank);
+    free(t->merged);
+    memset(t, 0, sizeof(*t));
+}
 
 int tok_load(Tokenizer* t, const uint8_t* data, size_t size) {
-    if (size < 12 + 1024 || memcmp(data, "PTOK", 4)) return -1;
+    if (!t || !data) return -1;
     memset(t, 0, sizeof(*t));
-    t->n_vocab = rd32(data + 4);
-    t->n_merges = rd32(data + 8);
-    t->byte_id = (const uint32_t*)(data + 12);
-    const uint8_t* p = data + 12 + 1024;
-    t->raw = malloc(sizeof(*t->raw) * t->n_vocab);
-    t->raw_len = malloc(sizeof(*t->raw_len) * t->n_vocab);
-    t->special = malloc(t->n_vocab);
-    for (uint32_t i = 0; i < t->n_vocab; i++) {
-        t->special[i] = p[0];
-        t->raw_len[i] = (uint16_t)(p[1] | p[2] << 8);
-        t->raw[i] = p + 3;
-        p += 3 + t->raw_len[i];
-    }
-    uint32_t cap = 1;
-    while (cap < t->n_merges * 2) cap <<= 1;
-    t->mask = cap - 1;
-    t->keys = calloc(cap, sizeof(uint64_t));
-    t->rank = malloc(cap * sizeof(uint32_t));
-    t->merged = malloc(cap * sizeof(uint32_t));
-    for (uint32_t r = 0; r < t->n_merges; r++, p += 12) {
-        uint64_t key = ((uint64_t)rd32(p) << 32 | rd32(p + 4)) + 1;
-        uint32_t h = (uint32_t)(key * 0x9E3779B97F4A7C15ull >> 40) & t->mask;
-        while (t->keys[h] && t->keys[h] != key) h = (h + 1) & t->mask;
-        if (!t->keys[h]) {
-            t->keys[h] = key;
-            t->rank[h] = r;
-            t->merged[h] = rd32(p + 8);
+    if (size < 12u + 1024u || memcmp(data, "PTOK", 4) != 0) return -1;
+
+    const uint32_t vocab = rd32(data + 4);
+    const uint32_t merges = rd32(data + 8);
+    if (vocab < 256u || vocab > 1000000u || merges == 0u || merges > 1000000u) return -2;
+
+    const size_t byteMapOffset = 12u;
+    const size_t byteMapBytes = 256u * sizeof(uint32_t);
+    size_t cursor = byteMapOffset + byteMapBytes;
+    if (cursor > size) return -3;
+    const uint8_t* p = data + cursor;
+
+    t->n_vocab = vocab;
+    t->n_merges = merges;
+    t->byte_id = (const uint32_t*)(data + byteMapOffset);
+    for (uint32_t i = 0; i < 256u; ++i) {
+        if (rd32(data + byteMapOffset + (size_t)i * 4u) >= vocab) {
+            tok_clear(t);
+            return -4;
         }
     }
-    return (size_t)(p - data) == size ? 0 : -2;
+
+    t->raw = (const uint8_t**)calloc(vocab, sizeof(*t->raw));
+    t->raw_len = (uint16_t*)calloc(vocab, sizeof(*t->raw_len));
+    t->special = (uint8_t*)calloc(vocab, sizeof(*t->special));
+    if (!t->raw || !t->raw_len || !t->special) {
+        tok_clear(t);
+        return -5;
+    }
+
+    for (uint32_t i = 0; i < vocab; ++i) {
+        if (cursor > size || size - cursor < 3u) {
+            tok_clear(t);
+            return -6;
+        }
+        const uint16_t tokenLength = (uint16_t)((uint16_t)p[1] | ((uint16_t)p[2] << 8));
+        if ((size_t)tokenLength > size - cursor - 3u) {
+            tok_clear(t);
+            return -7;
+        }
+        t->special[i] = p[0] ? 1u : 0u;
+        t->raw_len[i] = tokenLength;
+        t->raw[i] = p + 3;
+        cursor += 3u + tokenLength;
+        p = data + cursor;
+    }
+
+    const uint64_t mergeBytes64 = (uint64_t)merges * 12u;
+    if (mergeBytes64 > (uint64_t)(size - cursor) ||
+        cursor + (size_t)mergeBytes64 != size) {
+        tok_clear(t);
+        return -8;
+    }
+
+    uint32_t cap = 1u;
+    const uint32_t minimumCapacity = merges * 2u;
+    while (cap < minimumCapacity) {
+        if (cap > (UINT32_MAX / 2u)) {
+            tok_clear(t);
+            return -9;
+        }
+        cap <<= 1;
+    }
+    t->mask = cap - 1u;
+    t->keys = (uint64_t*)calloc(cap, sizeof(*t->keys));
+    t->rank = (uint32_t*)malloc((size_t)cap * sizeof(*t->rank));
+    t->merged = (uint32_t*)malloc((size_t)cap * sizeof(*t->merged));
+    if (!t->keys || !t->rank || !t->merged) {
+        tok_clear(t);
+        return -10;
+    }
+
+    p = data + cursor;
+    for (uint32_t r = 0; r < merges; ++r, p += 12) {
+        const uint32_t left = rd32(p);
+        const uint32_t right = rd32(p + 4);
+        const uint32_t result = rd32(p + 8);
+        if (left >= vocab || right >= vocab || result >= vocab) {
+            tok_clear(t);
+            return -11;
+        }
+        const uint64_t key = (((uint64_t)left << 32) | right) + 1u;
+        uint32_t slot = (uint32_t)(key * 0x9E3779B97F4A7C15ull >> 40) & t->mask;
+        while (t->keys[slot] && t->keys[slot] != key) slot = (slot + 1u) & t->mask;
+        if (!t->keys[slot]) {
+            t->keys[slot] = key;
+            t->rank[slot] = r;
+            t->merged[slot] = result;
+        }
+    }
+    return 0;
 }
 
 static int find_merge(const Tokenizer* t, uint32_t a, uint32_t b, uint32_t* merged) {

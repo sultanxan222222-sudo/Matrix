@@ -231,7 +231,7 @@ typedef struct {
     S3G s3;
 #ifdef MATRIX_ANDROID
     void* android_cl_runtime;
-
+    uint32_t sampling_vocab;       // tokenizer's real vocabulary; output projection may have padded rows
 #endif
 } Engine;
 

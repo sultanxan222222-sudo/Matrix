@@ -32,7 +32,7 @@ namespace {
 
 constexpr int MAX_PROMPT_TOKENS = 1024;
 constexpr int MAX_OUTPUT_TOKENS = 80;
-constexpr int MAX_MODEL_CONTEXT = 8192;
+constexpr int MAX_MODEL_CONTEXT = 2048;
 
 struct MatrixAgent {
     Engine engine{};
@@ -159,6 +159,20 @@ std::string decodeToken(const Tokenizer& tokenizer, uint32_t id) {
     return std::string(reinterpret_cast<const char*>(piece), static_cast<size_t>(size));
 }
 
+bool findSpecialToken(const Tokenizer& tokenizer, const char* spelling, uint32_t* tokenId) {
+    if (!spelling || !tokenId) return false;
+    const size_t length = std::strlen(spelling);
+    if (length == 0 || length > UINT16_MAX) return false;
+    for (uint32_t id = 0; id < tokenizer.n_vocab; ++id) {
+        if (tokenizer.special[id] && tokenizer.raw_len[id] == length &&
+            std::memcmp(tokenizer.raw[id], spelling, length) == 0) {
+            *tokenId = id;
+            return true;
+        }
+    }
+    return false;
+}
+
 std::string evaluateLocked(MatrixAgent* agent, const std::string& observation) {
     if (!agent || !agent->engineReady || !agent->tokenizerReady) {
         return "{\"error\":\"MATRIX_GARLIC_NOT_READY\"}";
@@ -188,18 +202,36 @@ std::string evaluateLocked(MatrixAgent* agent, const std::string& observation) {
         return true;
     };
 
+    uint32_t thinkOpen = 0, thinkClose = 0;
+    if (!findSpecialToken(agent->tokenizer, "<think>", &thinkOpen) ||
+        !findSpecialToken(agent->tokenizer, "</think>", &thinkClose)) {
+        return "{\"error\":\"MATRIX_THINK_TOKENS_MISSING\"}";
+    }
+
     prompt.push_back(agent->engine.im_start);
     if (!appendText("system\n") || !appendText(systemText)) {
         return "{\"error\":\"MATRIX_PROMPT_TOO_LONG\"}";
     }
     prompt.push_back(agent->engine.im_end);
+    if (!appendText("\n")) return "{\"error\":\"MATRIX_PROMPT_TOO_LONG\"}";
+
     prompt.push_back(agent->engine.im_start);
     if (!appendText("user\n") || !appendText(observation)) {
         return "{\"error\":\"MATRIX_PROMPT_TOO_LONG\"}";
     }
     prompt.push_back(agent->engine.im_end);
+    if (!appendText("\n")) return "{\"error\":\"MATRIX_PROMPT_TOO_LONG\"}";
+
+    // Match Qwen3.5's official no-thinking assistant prefix. Special tokens must be
+    // inserted by ID; tok_encode deliberately handles plain text only.
     prompt.push_back(agent->engine.im_start);
-    if (!appendText("assistant\n") || prompt.empty() || prompt.size() > MAX_MODEL_CONTEXT - MAX_OUTPUT_TOKENS) {
+    if (!appendText("assistant\n")) return "{\"error\":\"MATRIX_PROMPT_TOO_LONG\"}";
+    prompt.push_back(thinkOpen);
+    if (!appendText("\n\n")) return "{\"error\":\"MATRIX_PROMPT_TOO_LONG\"}";
+    prompt.push_back(thinkClose);
+    if (!appendText("\n\n") || prompt.empty() ||
+        prompt.size() > static_cast<size_t>(agent->engine.max_seq > MAX_OUTPUT_TOKENS ?
+                                            agent->engine.max_seq - MAX_OUTPUT_TOKENS : 0)) {
         return "{\"error\":\"MATRIX_PROMPT_TOO_LONG\"}";
     }
 
@@ -296,6 +328,38 @@ Java_org_matrixvpn_ai_GarlicMatrixPolicy_nativeCreate(JNIEnv* env, jobject,
         delete agent;
         return 0;
     }
+
+    // Qwen's output projection may have zero-padded rows. Those rows are not valid
+    // tokenizer IDs; clamp both sampling and all subsequent token decoding to PTOK.
+    if (agent->tokenizer.n_vocab == 0 ||
+        agent->tokenizer.n_vocab > agent->engine.vocab ||
+        agent->engine.vocab - agent->tokenizer.n_vocab > 1024u ||
+        agent->engine.im_start >= agent->tokenizer.n_vocab ||
+        agent->engine.im_end >= agent->tokenizer.n_vocab ||
+        agent->engine.eos >= agent->tokenizer.n_vocab ||
+        agent->engine.eos2 >= agent->tokenizer.n_vocab) {
+        logError("Qwen projection vocabulary and Garlic tokenizer IDs are inconsistent.");
+        engine_close(&agent->engine);
+        freeTokenizer(&agent->tokenizer);
+        delete agent;
+        return 0;
+    }
+    agent->engine.sampling_vocab = agent->tokenizer.n_vocab;
+
+    // Do not advertise MATRIX AI as ready until the real Garlic Qwen path has
+    // completed a GPU token pass and returned a valid tokenizer ID.
+    const uint32_t bootToken = agent->engine.im_start;
+    uint32_t bootOutput = 0;
+    if (engine_run(&agent->engine, &bootToken, 1, 0, 0.0f, 0x4D415452u, &bootOutput) != 0 ||
+        bootOutput >= agent->engine.sampling_vocab) {
+        logError(agent->engine.error[0] ? agent->engine.error :
+                 "Garlic Qwen GPU smoke test returned an invalid token ID.");
+        engine_close(&agent->engine);
+        freeTokenizer(&agent->tokenizer);
+        delete agent;
+        return 0;
+    }
+    engine_reset(&agent->engine);
     agent->engineReady = true;
     __android_log_print(ANDROID_LOG_INFO, MATRIX_AGENT_TAG,
                         "Garlic Qwen3.5 engine initialized: %u layers, %u context, %u vocabulary.",

@@ -315,6 +315,7 @@ static int load_index(Engine* e, const char* dir) {
         e->im_start = 151644;
     }
     e->im_end = e->eos;
+    e->sampling_vocab = e->vocab;
     e->layer_base = calloc(e->n_layers, sizeof(uint32_t));
     for (uint32_t i = 0, b = 2; i < e->n_layers; i++) {   // full attention 8 tensors per layer, DeltaNet 10
         e->layer_base[i] = b;
@@ -460,10 +461,16 @@ int engine_init(Engine* e, const char* dir, ProgressFn progress, void* user) {
         uint64_t khalf = e->layer_cache / 2, vhalf = (uint64_t)e->max_seq / 2 * e->n_kv * (e->head_dim + 4), n_full = 0;
         for (uint32_t i = 0; i < e->n_layers; i++) n_full += e->full_mask >> i & 1;
         e->kv_split = n_full * (khalf + vhalf);
-        uint64_t lo = gpu_alloc(e, e->kv_split);
-        e->kv_hi = gpu_alloc(e, e->kv_split);
-        if (lo && e->kv_hi && e->kv_hi != lo + e->kv_split) e->kv_hi = 0;   // (gpu_alloc rounds to 256 bytes)
-        for (uint32_t i = 0, j = 0; lo && e->kv_hi && i < e->n_layers; i++) {
+        if (e->kv_split > UINT64_MAX / 2) {
+            fail(e, "Qwen KV cache size overflows the Android address space.");
+            return -1;
+        }
+        // Garlic's ATTN_SPLIT kernels calculate (cache pointer + kv_split). Both halves
+        // must belong to one cl_mem allocation: adjacent host allocations are not adjacent
+        // OpenCL address spaces, even when the CPU allocator returned neighboring addresses.
+        uint64_t lo = gpu_alloc(e, e->kv_split * 2);
+        e->kv_hi = lo ? lo + e->kv_split : 0;
+        for (uint32_t i = 0, j = 0; lo && e->kv_hi && !e->error[0] && i < e->n_layers; i++) {
             if (e->full_mask >> i & 1) {
                 e->kc[i] = lo + j * (khalf + vhalf);
                 e->vc[i] = e->kc[i] + khalf;
@@ -1014,7 +1021,9 @@ static void step(Engine* e, uint32_t pos, uint32_t forced, uint32_t slot, int sa
         matvec(e, e->head_idx, e->xn, e->logits);
         // min-p 0.05: drop tokens under 5 % of the top token's probability (gap T * ln 20 in logits)
         double min_gap = inv_temp > 0.0f ? 2.9957 / inv_temp : 0.0;
-        dispatch(e, e->k_sample, args(e, "pufuppuf", e->logits, e->vocab, (double)inv_temp, seed, e->last, e->history, 0,
+        dispatch(e, e->k_sample, args(e, "pufuppuf", e->logits,
+                                      e->sampling_vocab && e->sampling_vocab <= e->vocab ? e->sampling_vocab : e->vocab,
+                                      (double)inv_temp, seed, e->last, e->history, 0,
                                       min_gap),
                  1, 256);
     }
@@ -1130,7 +1139,9 @@ static void prefill(Engine* e, uint64_t stage, const uint32_t* tokens, uint32_t 
         dispatch(e, e->k_rmsnorm, args(e, "pppuf", xl, W(e, 1), e->xn, H, (double)e->eps), 1, 256);
         matvec(e, e->head_idx, e->xn, e->logits);
         double min_gap = inv_temp > 0.0f ? 2.9957 / inv_temp : 0.0;
-        dispatch(e, e->k_sample, args(e, "pufuppuf", e->logits, e->vocab, (double)inv_temp, seed, e->last, e->history, 0,
+        dispatch(e, e->k_sample, args(e, "pufuppuf", e->logits,
+                                      e->sampling_vocab && e->sampling_vocab <= e->vocab ? e->sampling_vocab : e->vocab,
+                                      (double)inv_temp, seed, e->last, e->history, 0,
                                       min_gap),
                  1, 256);
     }
