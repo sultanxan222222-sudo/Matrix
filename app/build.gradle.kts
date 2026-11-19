@@ -12,6 +12,7 @@ android {
         versionCode = 6
         versionName = "0.5.1"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        ndk { abiFilters += listOf("arm64-v8a") }
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
@@ -22,10 +23,7 @@ android {
 }
 dependencies {
     implementation("androidx.core:core-ktx:1.15.0")
-    // Google on-device LLM runtime; runs Qwen3.5 .litertlm models on Android.
-    implementation("com.google.ai.edge.litertlm:litertlm-android:0.19.1")
-    // Embeddable AmneziaWG tunnel library; supports AWG configuration extensions
-    // while retaining the WireGuard Android backend/config API used by MATRIX.
+    // Existing MATRIX AmneziaWG backend is retained and remains responsible for VPN execution.
     implementation("com.zaneschepke:amneziawg-android:2.3.7")
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.3")
     testImplementation("junit:junit:4.13.2")
