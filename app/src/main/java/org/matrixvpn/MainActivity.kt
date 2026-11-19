@@ -871,9 +871,12 @@ class MainActivity : Activity() {
                         status.text = "Автоподбор отменён пользователем."
                         return@runOnUiThread
                     }
-                    vpnCandidates.clear()
+                    // Refresh generated WARP alternatives without deleting user-imported
+                    // profiles or the profile that is currently carrying the tunnel.
+                    vpnCandidates.keys.removeIf { it.startsWith("warp-") && it != activeCandidateId }
+                    candidateHealth.keys.removeIf { it.startsWith("warp-") && it != activeCandidateId }
                     parsed.forEach { vpnCandidates[it.id] = it }
-                    wireGuardConfig = parsed.first().config
+                    if (wireGuardConfig == null) wireGuardConfig = parsed.first().config
                     connectButton.isEnabled = true
                     autoVpnButton.isEnabled = true
                     status.text = "MATRIX получил и проверил профили: ${parsed.size}\nИсточник: awgconfig.com / Cloudflare WARP • ${if (usedEndpointLab) "разные проверенные endpoint" else "hostname endpoint"}"
