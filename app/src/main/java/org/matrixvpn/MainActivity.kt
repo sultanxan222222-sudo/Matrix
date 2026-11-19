@@ -1060,22 +1060,20 @@ class MainActivity : Activity() {
                     activeConfig = null
                     return@execute
                 }
-                val probe = TunnelConnectivityProbe.check()
-                if (manualConnectGeneration.get() != generation) {
-                    wireGuardBackend.setState(matrixTunnel, State.DOWN, null)
-                    tunnelUp = false
-                    activeConfig = null
-                    return@execute
-                }
-                runOnUiThread {
-                    requestGarlicNetworkAssessment(probe)
-                    status.text = if (probe.reachable) {
-                        "VPN-туннель запущен\n${probe.message}\nПодтверждение рукопожатия с сервером отдельно не проверено."
-                    } else {
-                        "VPN-туннель запущен, но проверка интернета не пройдена.\n${probe.message}\nСервер может быть недоступен или профиль может не направлять интернет-трафик через туннель."
+                probeExecutor.execute {
+                    val probe = TunnelConnectivityProbe.check()
+                    if (manualConnectGeneration.get() != generation) return@execute
+                    runOnUiThread {
+                        if (manualConnectGeneration.get() != generation) return@runOnUiThread
+                        requestGarlicNetworkAssessment(probe)
+                        status.text = if (probe.reachable) {
+                            "VPN-туннель запущен\n${probe.message}\nПодтверждение рукопожатия с сервером отдельно не проверено."
+                        } else {
+                            "VPN-туннель запущен, но проверка интернета не пройдена.\n${probe.message}\nСервер может быть недоступен или профиль может не направлять интернет-трафик через туннель."
+                        }
+                        connectButton.isEnabled = true
+                        connectButton.text = if (tunnelUp) "Отключить VPN" else "Подключить VPN"
                     }
-                    connectButton.isEnabled = true
-                    connectButton.text = if (tunnelUp) "Отключить VPN" else "Подключить VPN"
                 }
             } catch (e: Exception) {
                 runOnUiThread {
