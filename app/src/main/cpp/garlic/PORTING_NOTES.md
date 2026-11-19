@@ -29,10 +29,12 @@ This directory contains source files adapted from the Garlic LLM Qwen3.5 decoder
 
 `GarlicAndroidBackend` uses a JNI bridge and a packaged clvk OpenCL-on-Vulkan runtime to enumerate the GPU, load a clspv-generated SPIR-V vector-add kernel, execute it, and verify the result. This is a backend smoke test, **not yet full Qwen inference**.
 
+The clvk source checkout is patched at build time by `native/garlic_android/patch_clvk_for_precompiled_il.py`. The patch enables the SPIR-V IL extension without enabling a runtime compiler and makes `clCreateProgramWithIL` load the already-compiled SPIR-V words directly as a Vulkan executable. This avoids shipping Clang/LLVM/clspv executables in the Android APK. The MATRIX kernels contain no specialization constants; the patched no-compiler path is intentionally scoped to those precompiled Garlic modules.
+
 The intended stack is:
 - Garlic's original Qwen3.5 model and inference logic.
 - clspv to compile adapted OpenCL C kernels to SPIR-V during the build.
-- clvk to execute OpenCL commands on Android Vulkan.
+- clvk, with a small documented patch, to execute precompiled SPIR-V through OpenCL on Android Vulkan.
 - Android NDK/JNI for native memory, loading, scheduling and file integration.
 - MATRIX's existing AmneziaWG backend for actual VPN execution.
 
