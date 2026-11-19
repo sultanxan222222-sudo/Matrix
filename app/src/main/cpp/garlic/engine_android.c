@@ -1355,7 +1355,6 @@ void engine_close(Engine* e) {
     if (e->android_cl_runtime) {
         matrix_cl_destroy((MatrixClRuntime*)e->android_cl_runtime);
         e->android_cl_runtime = NULL;
-        e->android_cl_memory = NULL;
     }
     if (e->fd >= 0) close(e->fd);
     free(e->ids);
