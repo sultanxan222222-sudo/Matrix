@@ -496,12 +496,11 @@ class MainActivity : Activity() {
             val previousConfig = activeConfig
             val previousId = activeCandidateId
             try {
-                if (tunnelUp) {
-                    wireGuardBackend.setState(matrixTunnel, State.DOWN, null)
-                    tunnelUp = false
-                }
                 if (!autopilotLatch.isActive(token)) return@connectTask
 
+                // GoBackend handles UP->UP reconfiguration itself. It tears down the
+                // current interface, starts the candidate, and restores the old config
+                // if candidate activation throws. Avoid a separate manual DOWN/UP pair.
                 wireGuardBackend.setState(matrixTunnel, State.UP, candidate.config)
                 activeConfig = candidate.config
                 activeCandidateId = candidate.id
@@ -516,8 +515,8 @@ class MainActivity : Activity() {
                     return@connectTask
                 }
 
-                // Run the potentially slow HTTPS probe on a separate executor. The emergency
-                // stop command therefore never waits behind a network timeout.
+                // The HTTPS test is isolated from the serialized tunnel executor so the
+                // user's emergency-stop action never waits behind a network timeout.
                 probeExecutor.execute probeTask@{
                     val probe = TunnelConnectivityProbe.check()
                     if (!autopilotLatch.isActive(token)) return@probeTask
@@ -538,64 +537,83 @@ class MainActivity : Activity() {
                         vpnExecutor.execute failoverTask@{
                             if (!autopilotLatch.isActive(token)) return@failoverTask
                             try {
-                                if (tunnelUp) wireGuardBackend.setState(matrixTunnel, State.DOWN, null)
-                                tunnelUp = false
-                                activeConfig = null
-                                activeCandidateId = null
-
                                 val previousRouteWasAlreadyFailed =
                                     previousId != null && previousId in excludedIds
                                 val restoredPrevious = previousConfig != null &&
                                     !previousRouteWasAlreadyFailed && autopilotLatch.isActive(token)
+
                                 if (restoredPrevious) {
+                                    // Reconfigure directly to the last known-good profile;
+                                    // GoBackend performs its own rollback if this fails.
                                     wireGuardBackend.setState(matrixTunnel, State.UP, previousConfig)
                                     activeConfig = previousConfig
                                     activeCandidateId = previousId
                                     tunnelUp = true
+                                    if (autopilotLatch.isActive(token)) {
+                                        runOnUiThread {
+                                            aiStatus.text = "MATRIX AI: тест неудачен; прежний VPN восстановлен"
+                                        }
+                                        scheduleAutoHealthCheck(token)
+                                    }
+                                } else {
+                                    wireGuardBackend.setState(matrixTunnel, State.DOWN, null)
+                                    tunnelUp = false
+                                    activeConfig = null
+                                    activeCandidateId = null
+                                    if (autopilotLatch.isActive(token)) {
+                                        runOnUiThread {
+                                            aiStatus.text = "MATRIX AI: ${candidate.id} не прошёл проверку; выбирается следующий"
+                                        }
+                                        requestAutomaticCandidateSelection(failed, probe, token)
+                                    }
                                 }
-                                if (restoredPrevious && autopilotLatch.isActive(token)) {
-                                    runOnUiThread {
-                                        aiStatus.text = "MATRIX AI: тест неудачен; прежний VPN восстановлен"
-                                    }
-                                    scheduleAutoHealthCheck(token)
-                                } else if (autopilotLatch.isActive(token)) {
-                                    runOnUiThread {
-                                        aiStatus.text = "MATRIX AI: ${candidate.id} не прошёл HTTPS-проверку, выбирается следующий"
-                                    }
+                            } catch (restoreError: Exception) {
+                                // If restoring the last known-good profile fails, leave no
+                                // ambiguous tunnel state and continue only while the latch allows it.
+                                try {
+                                    wireGuardBackend.setState(matrixTunnel, State.DOWN, null)
+                                } catch (_: Exception) {
+                                }
+                                tunnelUp = false
+                                activeConfig = null
+                                activeCandidateId = null
+                                if (autopilotLatch.isActive(token)) {
                                     requestAutomaticCandidateSelection(failed, probe, token)
                                 }
-                            } catch (_: Exception) {
-                                // A failed restore does not override the human-owned stop latch.
                             }
                         }
                     }
                 }
             } catch (error: Exception) {
-                try {
-                    if (tunnelUp) wireGuardBackend.setState(matrixTunnel, State.DOWN, null)
+                // GoBackend attempts to restore its previous tunnel when an UP->UP
+                // configuration change fails. Preserve that route when it was not marked bad.
+                val previousRouteWasAlreadyFailed =
+                    previousId != null && previousId in excludedIds
+                val restoredPrevious = previousConfig != null &&
+                    tunnelUp && !previousRouteWasAlreadyFailed && autopilotLatch.isActive(token)
+
+                if (restoredPrevious) {
+                    activeConfig = previousConfig
+                    activeCandidateId = previousId
+                    runOnUiThread {
+                        aiStatus.text = "MATRIX AI: новый вариант не запустился; прежний VPN сохранён"
+                    }
+                    scheduleAutoHealthCheck(token)
+                } else {
+                    try {
+                        if (tunnelUp) wireGuardBackend.setState(matrixTunnel, State.DOWN, null)
+                    } catch (_: Exception) {
+                    }
                     tunnelUp = false
                     activeConfig = null
                     activeCandidateId = null
-                    val previousRouteWasAlreadyFailed =
-                        previousId != null && previousId in excludedIds
-                    val restoredPrevious = previousConfig != null &&
-                        !previousRouteWasAlreadyFailed && autopilotLatch.isActive(token)
-                    if (restoredPrevious) {
-                        wireGuardBackend.setState(matrixTunnel, State.UP, previousConfig)
-                        activeConfig = previousConfig
-                        activeCandidateId = previousId
-                        tunnelUp = true
-                    }
                     val failed = excludedIds + candidate.id
-                    if (restoredPrevious && autopilotLatch.isActive(token)) {
-                        runOnUiThread { aiStatus.text = "MATRIX AI: кандидат не подключился; прежний VPN восстановлен" }
-                        scheduleAutoHealthCheck(token)
-                    } else if (autopilotLatch.isActive(token)) {
-                        runOnUiThread { aiStatus.text = "MATRIX AI: кандидат не подключился; проверяется следующий" }
+                    if (autopilotLatch.isActive(token)) {
+                        runOnUiThread {
+                            aiStatus.text = "MATRIX AI: кандидат не подключился; проверяется следующий"
+                        }
                         requestAutomaticCandidateSelection(failed, null, token)
                     }
-                } catch (_: Exception) {
-                    // Keep traffic disconnected when restore fails; the stop latch remains authoritative.
                 }
             }
         }
