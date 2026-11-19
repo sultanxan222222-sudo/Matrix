@@ -58,7 +58,11 @@ class GarlicModelPackInstaller(context: Context) {
         try {
             val (manifest, actual) = extract(uri, stage)
             verifyHashes(manifest, actual)
-            validateIndex(File(stage, "model.idx"))
+            val weightsFile = File(stage, "qwen3.5-0.8b-q4i.bin")
+            val tokenizerFile = File(stage, "tokenizer.bin")
+            val modelIndex = File(stage, "model.idx")
+            validateIndex(modelIndex, weightsFile)
+            validateTokenizer(tokenizerFile, readIndexUInt32(modelIndex, 28))
 
             var oldMoved = false
             if (target.exists()) {
@@ -154,38 +158,144 @@ class GarlicModelPackInstaller(context: Context) {
         }
     }
 
-    private fun validateIndex(file: File) {
-        require(file.isFile && file.length() >= 224L) { "model.idx отсутствует или повреждён." }
-        val bytes = ByteArray(224)
-        FileInputStream(file).use { input ->
-            var offset = 0
-            while (offset < bytes.size) {
-                val count = input.read(bytes, offset, bytes.size - offset)
-                if (count <= 0) break
-                offset += count
-            }
-            require(offset == bytes.size) { "Не удалось прочитать заголовок model.idx." }
+    private fun validateIndex(file: File, weightsFile: File) {
+        require(file.isFile && file.length() in 224L..(4L * 1024 * 1024)) {
+            "model.idx отсутствует, слишком большой или повреждён."
         }
+        val bytes = file.readBytes()
         require(String(bytes, 0, 4, Charsets.US_ASCII) == "PMQ5") {
             "Нужен формат Garlic Qwen3.5 PMQ5."
         }
+
         fun u32(offset: Int): Long =
             (bytes[offset].toLong() and 255L) or
             ((bytes[offset + 1].toLong() and 255L) shl 8) or
             ((bytes[offset + 2].toLong() and 255L) shl 16) or
             ((bytes[offset + 3].toLong() and 255L) shl 24)
 
-        require(u32(4) in 1..128 && u32(8) in 64..16384) {
+        fun u64(offset: Int): Long {
+            var value = 0L
+            for (i in 0 until 8) {
+                value = value or ((bytes[offset + i].toLong() and 255L) shl (i * 8))
+            }
+            return value
+        }
+
+        val layers = u32(4)
+        val hidden = u32(8)
+        val vocab = u32(28)
+        val maxContext = u32(32)
+        val expectedWeightBytes = u64(180)
+        val tensorCount = u32(188)
+        require(layers in 1..128 && hidden in 64..16384 && vocab in 256..1_000_000) {
             "Размерности модели в model.idx недопустимы."
         }
-        require(u32(32) == 2048L) {
+        require(maxContext == 2048L) {
             "Контекст модели не совпадает с Android-ядрами MATRIX (2048)."
         }
-        val tensorCount = u32(188)
-        require(tensorCount in 10..2048 && file.length() == 224L + tensorCount * 36L) {
+        require(tensorCount in 10..2048 && bytes.size.toLong() == 224L + tensorCount * 36L) {
             "Таблица тензоров model.idx повреждена."
         }
+        require(expectedWeightBytes > 0L && expectedWeightBytes == weightsFile.length()) {
+            "Размер файла весов не совпадает с размером в model.idx."
+        }
+
+        val ranges = ArrayList<Pair<Long, Long>>(tensorCount.toInt())
+        for (index in 0 until tensorCount.toInt()) {
+            val pos = 224 + index * 36
+            val offset = u64(pos)
+            val size = u64(pos + 8)
+            val rows = u32(pos + 16)
+            val columns = u32(pos + 20)
+            val scalesOffset = u64(pos + 24)
+            require(offset >= 0L && size > 0L && offset % 256L == 0L &&
+                offset <= expectedWeightBytes && size <= expectedWeightBytes - offset) {
+                "Тензор $index выходит за границы файла весов."
+            }
+            require(rows in 1..1_000_000 && columns in 1..65536 &&
+                scalesOffset >= 0L && scalesOffset <= size) {
+                "У тензора $index повреждены размерности или смещение шкал."
+            }
+            ranges += offset to (offset + size)
+        }
+        val sortedRanges = ranges.sortedBy { it.first }
+        for (index in 1 until sortedRanges.size) {
+            require(sortedRanges[index - 1].second <= sortedRanges[index].first) {
+                "Записи тензоров в model.idx перекрываются."
+            }
+        }
     }
+
+    private fun readIndexUInt32(file: File, offset: Int): Long {
+        val bytes = ByteArray(4)
+        FileInputStream(file).use { input ->
+            require(input.skip(offset.toLong()) == offset.toLong()) {
+                "Не удалось прочитать поле model.idx."
+            }
+            require(input.read(bytes) == bytes.size) { "model.idx усечён." }
+        }
+        return (bytes[0].toLong() and 255L) or
+            ((bytes[1].toLong() and 255L) shl 8) or
+            ((bytes[2].toLong() and 255L) shl 16) or
+            ((bytes[3].toLong() and 255L) shl 24)
+    }
+
+    private fun validateTokenizer(file: File, expectedVocabulary: Long) {
+        require(file.isFile && file.length() in 1036L..(64L * 1024 * 1024)) {
+            "tokenizer.bin отсутствует или имеет недопустимый размер."
+        }
+        val bytes = file.readBytes()
+        require(String(bytes, 0, 4, Charsets.US_ASCII) == "PTOK") {
+            "Токенизатор не в исходном формате Garlic PTOK."
+        }
+
+        fun u32(offset: Int): Long =
+            (bytes[offset].toLong() and 255L) or
+            ((bytes[offset + 1].toLong() and 255L) shl 8) or
+            ((bytes[offset + 2].toLong() and 255L) shl 16) or
+            ((bytes[offset + 3].toLong() and 255L) shl 24)
+
+        val vocabulary = u32(4)
+        val merges = u32(8)
+        require(vocabulary == expectedVocabulary && vocabulary in 256..1_000_000 &&
+            merges in 1..10_000_000) {
+            "Размер словаря токенизатора не совпадает с моделью."
+        }
+
+        var cursor = 12 + 256 * 4
+        for (token in 0 until vocabulary.toInt()) {
+            require(cursor + 3 <= bytes.size) {
+                "Запись токена $token обрезана."
+            }
+            val tokenBytes = (bytes[cursor + 1].toInt() and 255) or
+                ((bytes[cursor + 2].toInt() and 255) shl 8)
+            cursor += 3
+            require(tokenBytes <= bytes.size - cursor) {
+                "Данные токена $token выходят за границы tokenizer.bin."
+            }
+            cursor += tokenBytes
+        }
+        val mergeBytes = merges * 12L
+        require(mergeBytes <= Int.MAX_VALUE && cursor.toLong() + mergeBytes == bytes.size.toLong()) {
+            "Таблица объединений BPE в tokenizer.bin повреждена."
+        }
+
+        for (entry in 0 until merges.toInt()) {
+            val pos = cursor + entry * 12
+            val left = u32At(bytes, pos)
+            val right = u32At(bytes, pos + 4)
+            val merged = u32At(bytes, pos + 8)
+            require(left < vocabulary && right < vocabulary && merged < vocabulary) {
+                "Таблица BPE содержит ссылку на неизвестный токен."
+            }
+        }
+    }
+
+    private fun u32At(bytes: ByteArray, offset: Int): Long =
+        (bytes[offset].toLong() and 255L) or
+            ((bytes[offset + 1].toLong() and 255L) shl 8) or
+            ((bytes[offset + 2].toLong() and 255L) shl 16) or
+            ((bytes[offset + 3].toLong() and 255L) shl 24)
 
     private fun parseManifest(bytes: ByteArray): Map<String, String> {
         val json = JSONObject(String(bytes, Charsets.UTF_8))
