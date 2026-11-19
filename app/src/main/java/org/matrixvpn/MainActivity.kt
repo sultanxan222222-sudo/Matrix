@@ -181,6 +181,20 @@ class MainActivity : Activity() {
         networkWatcher = NetworkWatcher(this) { state ->
             runOnUiThread { networkStatus.text = state.summary() }
         }
+
+        // Reuse a previously imported private model pack after an app restart.
+        val installedModel = File(filesDir, "models/garlic")
+        val hasInstalledPack = File(installedModel, "model.idx").isFile &&
+            File(installedModel, "tokenizer.bin").isFile &&
+            File(installedModel, "qwen3.5-0.8b-q4i.bin").isFile
+        if (hasInstalledPack) {
+            aiStatus.text = "MATRIX AI: загружена модель, запуск Garlic…"
+            window.decorView.postDelayed({
+                if (!isFinishing && !isDestroyed && garlicPolicy == null) {
+                    initializeGarlicPolicy(installedModel)
+                }
+            }, 2_200L)
+        }
     }
 
     override fun onStart() {
