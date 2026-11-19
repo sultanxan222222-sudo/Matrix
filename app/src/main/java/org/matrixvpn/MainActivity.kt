@@ -467,8 +467,8 @@ class MainActivity : Activity() {
         excludedIds: Set<String>,
         token: Long
     ) {
-        vpnExecutor.execute {
-            if (!autopilotLatch.isActive(token)) return@execute
+        vpnExecutor.execute connectTask@{
+            if (!autopilotLatch.isActive(token)) return@connectTask
             val previousConfig = activeConfig
             val previousId = activeCandidateId
             try {
@@ -494,9 +494,9 @@ class MainActivity : Activity() {
 
                 // Run the potentially slow HTTPS probe on a separate executor. The emergency
                 // stop command therefore never waits behind a network timeout.
-                probeExecutor.execute {
+                probeExecutor.execute probeTask@{
                     val probe = TunnelConnectivityProbe.check()
-                    if (!autopilotLatch.isActive(token)) return@execute
+                    if (!autopilotLatch.isActive(token)) return@probeTask
 
                     if (probe.reachable) {
                         runOnUiThread {
@@ -511,8 +511,8 @@ class MainActivity : Activity() {
                         scheduleAutoHealthCheck(token)
                     } else {
                         val failed = excludedIds + candidate.id
-                        vpnExecutor.execute {
-                            if (!autopilotLatch.isActive(token)) return@execute
+                        vpnExecutor.execute failoverTask@{
+                            if (!autopilotLatch.isActive(token)) return@failoverTask
                             try {
                                 if (tunnelUp) wireGuardBackend.setState(matrixTunnel, State.DOWN, null)
                                 tunnelUp = false
@@ -577,10 +577,10 @@ class MainActivity : Activity() {
         val task = object : Runnable {
             override fun run() {
                 if (!autopilotLatch.isActive(token) || !tunnelUp) return
-                probeExecutor.execute {
-                    if (!autopilotLatch.isActive(token) || !tunnelUp) return@execute
+                probeExecutor.execute healthProbeTask@{
+                    if (!autopilotLatch.isActive(token) || !tunnelUp) return@healthProbeTask
                     val probe = TunnelConnectivityProbe.check()
-                    if (!autopilotLatch.isActive(token)) return@execute
+                    if (!autopilotLatch.isActive(token)) return@healthProbeTask
                     val currentId = activeCandidateId
                     val failed = if (!probe.reachable && currentId != null) {
                         setOf(currentId)
@@ -1047,9 +1047,9 @@ class MainActivity : Activity() {
         val generation = manualConnectGeneration.incrementAndGet()
         status.text = "Запуск VPN-туннеля…"
         connectButton.isEnabled = false
-        vpnExecutor.execute {
+        vpnExecutor.execute manualConnectTask@{
             try {
-                if (manualConnectGeneration.get() != generation) return@execute
+                if (manualConnectGeneration.get() != generation) return@manualConnectTask
                 wireGuardBackend.setState(matrixTunnel, State.UP, config)
                 activeConfig = config
                 activeCandidateId = vpnCandidates.values.firstOrNull { it.config === config }?.id
@@ -1058,11 +1058,11 @@ class MainActivity : Activity() {
                     wireGuardBackend.setState(matrixTunnel, State.DOWN, null)
                     tunnelUp = false
                     activeConfig = null
-                    return@execute
+                    return@manualConnectTask
                 }
-                probeExecutor.execute {
+                probeExecutor.execute manualProbeTask@{
                     val probe = TunnelConnectivityProbe.check()
-                    if (manualConnectGeneration.get() != generation) return@execute
+                    if (manualConnectGeneration.get() != generation) return@manualProbeTask
                     runOnUiThread {
                         if (manualConnectGeneration.get() != generation) return@runOnUiThread
                         requestGarlicNetworkAssessment(probe)
