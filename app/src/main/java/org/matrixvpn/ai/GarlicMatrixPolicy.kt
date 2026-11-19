@@ -33,8 +33,8 @@ class GarlicMatrixPolicy(
         require(modelDirectory.isDirectory || modelDirectory.mkdirs()) {
             "Cannot create private model directory."
         }
-        require(modelDirectory.usableSpace > 256L * 1024L * 1024L) {
-            "Not enough free storage for the Garlic model pack."
+        require(modelDirectory.usableSpace > 600L * 1024L * 1024L) {
+            "Для распаковки встроенной модели Garlic нужно не менее 600 МиБ свободного места."
         }
 
         // The native library loads the model from app-private storage. The Qwen weights
