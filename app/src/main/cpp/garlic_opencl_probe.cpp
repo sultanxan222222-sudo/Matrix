@@ -67,6 +67,7 @@ constexpr cl_device_info CL_DEVICE_VENDOR = 0x102C;
 constexpr cl_device_info CL_DRIVER_VERSION = 0x102D;
 constexpr cl_device_info CL_DEVICE_VERSION = 0x102F;
 constexpr cl_device_info CL_PROGRAM_BUILD_LOG = 0x1183;
+constexpr cl_mem_flags CL_MEM_READ_WRITE = (1ull << 0);
 constexpr cl_mem_flags CL_MEM_WRITE_ONLY = (1ull << 1);
 constexpr cl_mem_flags CL_MEM_READ_ONLY = (1ull << 2);
 constexpr cl_mem_flags CL_MEM_COPY_HOST_PTR = (1ull << 5);
@@ -357,11 +358,117 @@ std::string runProbe(AAssetManager* assets) {
             break;
         }
     }
+    if (!correct) {
+        cleanup();
+        return failure("GPU-ядро выполнилось, но контрольные вычисления не совпали.");
+    }
+
+    // Run a real kernel from Garlic's adapted Qwen3.5 shader module. This checks the
+    // clspv-generated SPIR-V and clvk execution path, not only a synthetic smoke-test.
+    if (maxWorkGroup < 256) {
+        cleanup();
+        return failure("GPU не поддерживает рабочую группу из 256 потоков, требуемую этим вариантом Garlic.");
+    }
+    if (kernel) { cl.releaseKernel(kernel); kernel = nullptr; }
+    if (program) { cl.releaseProgram(program); program = nullptr; }
+    if (a) { cl.releaseMemObject(a); a = nullptr; }
+    if (b) { cl.releaseMemObject(b); b = nullptr; }
+    if (c) { cl.releaseMemObject(c); c = nullptr; }
+
+    AAsset* garlicAsset = AAssetManager_open(assets, "garlic/qwen35.spv", AASSET_MODE_BUFFER);
+    if (!garlicAsset) {
+        cleanup();
+        return failure("Не найден скомпилированный SPIR-V модуль Garlic Qwen3.5.");
+    }
+    const off_t garlicLength = AAsset_getLength(garlicAsset);
+    if (garlicLength <= 0 || garlicLength > (128 * 1024 * 1024)) {
+        AAsset_close(garlicAsset);
+        cleanup();
+        return failure("Размер SPIR-V модуля Garlic недопустим.");
+    }
+    std::vector<uint8_t> garlicIl(static_cast<size_t>(garlicLength));
+    const int garlicBytes = AAsset_read(garlicAsset, garlicIl.data(), garlicIl.size());
+    AAsset_close(garlicAsset);
+    if (garlicBytes != garlicLength) {
+        cleanup();
+        return failure("Не удалось полностью прочитать SPIR-V модуль Garlic.");
+    }
+
+    program = cl.createProgramWithIL(context, garlicIl.data(), garlicIl.size(), &status);
+    if (!program || status != CL_SUCCESS) {
+        cleanup();
+        return failure("clvk не принял SPIR-V модуль Qwen3.5 из Garlic.", status);
+    }
+    status = cl.buildProgram(program, 1, &selectedDevice, "", nullptr, nullptr);
+    if (status != CL_SUCCESS) {
+        size_t logSize = 0;
+        cl.getProgramBuildInfo(program, selectedDevice, CL_PROGRAM_BUILD_LOG, 0, nullptr, &logSize);
+        std::vector<char> log(std::min<size_t>(logSize, 8192) + 1, '\0');
+        if (logSize) cl.getProgramBuildInfo(program, selectedDevice, CL_PROGRAM_BUILD_LOG,
+                                            log.size() - 1, log.data(), nullptr);
+        const std::string message = "Garlic Qwen3.5 SPIR-V build failed: " + std::string(log.data());
+        cleanup();
+        return failure(message, status);
+    }
+    kernel = cl.createKernel(program, "add", &status);
+    if (!kernel || status != CL_SUCCESS) {
+        cleanup();
+        return failure("В модуле Garlic Qwen3.5 не найден базовый kernel add.", status);
+    }
+
+    constexpr cl_uint garlicCount = 256;
+    std::array<float, garlicCount> garlicLeft{};
+    std::array<float, garlicCount> garlicRight{};
+    for (cl_uint i = 0; i < garlicCount; ++i) {
+        garlicLeft[i] = static_cast<float>(i) * 0.125f;
+        garlicRight[i] = static_cast<float>(garlicCount - i) * 0.375f;
+    }
+    a = cl.createBuffer(context, CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR,
+                        sizeof(garlicLeft), garlicLeft.data(), &status);
+    if (!a || status != CL_SUCCESS) {
+        cleanup();
+        return failure("Не удалось создать тестовый буфер Garlic A.", status);
+    }
+    b = cl.createBuffer(context, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR,
+                        sizeof(garlicRight), garlicRight.data(), &status);
+    if (!b || status != CL_SUCCESS) {
+        cleanup();
+        return failure("Не удалось создать тестовый буфер Garlic B.", status);
+    }
+    status = cl.setKernelArg(kernel, 0, sizeof(a), &a);
+    if (status == CL_SUCCESS) status = cl.setKernelArg(kernel, 1, sizeof(b), &b);
+    if (status == CL_SUCCESS) status = cl.setKernelArg(kernel, 2, sizeof(garlicCount), &garlicCount);
+    if (status != CL_SUCCESS) {
+        cleanup();
+        return failure("Не удалось передать аргументы настоящему ядру Garlic.", status);
+    }
+
+    const size_t garlicGlobal = garlicCount;
+    const size_t garlicLocal = 256;
+    status = cl.enqueueNDRangeKernel(queue, kernel, 1, nullptr, &garlicGlobal, &garlicLocal,
+                                     0, nullptr, nullptr);
+    if (status == CL_SUCCESS) {
+        status = cl.enqueueReadBuffer(queue, a, CL_TRUE, 0, sizeof(garlicLeft), garlicLeft.data(),
+                                      0, nullptr, nullptr);
+    }
+    if (status == CL_SUCCESS) status = cl.finish(queue);
+    if (status != CL_SUCCESS) {
+        cleanup();
+        return failure("Выполнение настоящего ядра Garlic Qwen3.5 завершилось ошибкой.", status);
+    }
+    for (cl_uint i = 0; i < garlicCount; ++i) {
+        const float expected = static_cast<float>(i) * 0.125f +
+                               static_cast<float>(garlicCount - i) * 0.375f;
+        if (!std::isfinite(garlicLeft[i]) || std::fabs(garlicLeft[i] - expected) > 0.0001f) {
+            cleanup();
+            return failure("Ядро Garlic add выполнилось, но контрольные результаты не совпали.");
+        }
+    }
+
     cleanup();
-    if (!correct) return failure("GPU-ядро выполнилось, но контрольные вычисления не совпали.");
 
     std::ostringstream out;
-    out << "{\"ready\":true,\"probe\":\"passed\","
+    out << "{\"ready\":true,\"probe\":\"passed\",\"garlic_kernel_passed\":true,\"garlic_kernel\":\"add\","
         << "\"platform\":\"" << jsonEscape(platformName) << "\","
         << "\"platform_vendor\":\"" << jsonEscape(platformVendor) << "\","
         << "\"device\":\"" << jsonEscape(deviceName) << "\","
