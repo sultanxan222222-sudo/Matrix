@@ -1,5 +1,6 @@
 package org.matrixvpn.ai
 
+import org.json.JSONException
 import org.json.JSONObject
 
 /**
@@ -18,28 +19,53 @@ object GarlicPolicyOutputGate {
 
     fun validate(raw: String, allowedCandidateIds: Set<String>): Advice {
         require(raw.length in 2..4096) { "Garlic policy response has an invalid length." }
-        val json = JSONObject(raw.trim())
+
+        val json = try {
+            JSONObject(raw.trim())
+        } catch (error: JSONException) {
+            throw IllegalArgumentException("Garlic policy response is not valid JSON.", error)
+        }
+
         val allowedKeys = setOf("action", "profile_id", "confidence", "reason_code")
         val keys = json.keys().asSequence().toSet()
         require(keys == allowedKeys) { "Garlic policy response has unexpected or missing fields." }
 
-        val action = when (json.getString("action")) {
+        // Do not allow org.json's permissive String/Number coercions for model output.
+        val actionText = json.get("action") as? String
+            ?: throw IllegalArgumentException("Garlic returned a non-string action.")
+        val action = when (actionText) {
             "KEEP_CURRENT" -> Action.KEEP_CURRENT
             "PROBE_PROFILE" -> Action.PROBE_PROFILE
             "PROPOSE_FAILOVER" -> Action.PROPOSE_FAILOVER
             else -> throw IllegalArgumentException("Garlic returned a forbidden policy action.")
         }
-        val confidence = json.getDouble("confidence")
+
+        val confidenceValue = json.get("confidence")
+        require(confidenceValue is Number) { "Garlic returned a non-numeric confidence value." }
+        val confidence = confidenceValue.toDouble()
         require(confidence.isFinite() && confidence in 0.0..1.0) {
             "Garlic returned an invalid confidence value."
         }
 
-        val reason = json.getString("reason_code")
+        val reason = json.get("reason_code") as? String
+            ?: throw IllegalArgumentException("Garlic returned a non-string reason code.")
         require(reason.matches(Regex("[A-Z0-9_]{1,48}"))) {
             "Garlic returned an invalid reason code."
         }
 
-        val profileId = if (json.isNull("profile_id")) null else json.getString("profile_id")
+        val profileValue = json.get("profile_id")
+        val profileId = if (profileValue === JSONObject.NULL) {
+            null
+        } else {
+            profileValue as? String
+                ?: throw IllegalArgumentException("Garlic returned a non-string profile ID.")
+        }
+        if (profileId != null) {
+            require(profileId.length in 1..128 && profileId.isNotBlank()) {
+                "Garlic returned an invalid profile ID."
+            }
+        }
+
         when (action) {
             Action.KEEP_CURRENT -> require(profileId == null) {
                 "KEEP_CURRENT cannot name another profile."
