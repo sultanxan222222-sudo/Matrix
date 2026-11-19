@@ -186,11 +186,14 @@ std::string evaluateLocked(MatrixAgent* agent, const std::string& observation) {
         "JSON object with fields action, profile_id, confidence, reason_code. "
         "action must be CONNECT_PROFILE, KEEP_CURRENT, PROBE_PROFILE, or PROPOSE_FAILOVER. "
         "When tunnel_active is false and candidates exist, choose CONNECT_PROFILE with one candidate ID. "
-        "When the active tunnel is healthy, choose KEEP_CURRENT with profile_id null. "
+        "When the active tunnel is healthy, choose KEEP_CURRENT with profile_id null unless measured candidate data shows a clear, meaningful improvement. "
         "When the active tunnel is unhealthy, choose PROPOSE_FAILOVER with one candidate ID. "
-        "Use PROBE_PROFILE only to test a candidate that MATRIX has explicitly listed. "
+        "Use candidate_health records as historical evidence: prefer recently checked reachable entries with lower RTT, "
+        "treat records older than 600 seconds as stale, and avoid profile IDs listed as failed. "
+        "If candidates have not been tested, try one allowlisted candidate; do not claim an unmeasured route is healthy. "
+        "Use PROBE_PROFILE only for a candidate MATRIX has explicitly listed. "
         "KEEP_CURRENT requires profile_id null. All other actions require exactly one ID from candidate_profile_ids. "
-        "Never invent an ID. If no candidates exist, use KEEP_CURRENT. "
+        "Never invent an ID. If no candidates exist, use KEEP_CURRENT only if a tunnel is active. "
         "Never request secrets or change the human emergency stop, firewall, DNS security, or tunnel protection. "
         "Output no Markdown and no explanation outside the JSON object.\n";
 
