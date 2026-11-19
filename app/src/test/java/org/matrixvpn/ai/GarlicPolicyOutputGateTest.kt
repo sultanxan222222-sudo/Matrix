@@ -51,9 +51,41 @@ class GarlicPolicyOutputGateTest {
     }
 
     @Test(expected = IllegalArgumentException::class)
-    fun rejectsNonFiniteConfidence() {
+    fun rejectsOutOfRangeConfidence() {
         GarlicPolicyOutputGate.validate(
             """{"action":"KEEP_CURRENT","profile_id":null,"confidence":1.5,"reason_code":"OK"}""",
+            emptySet()
+        )
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun rejectsStringConfidenceInsteadOfNumber() {
+        GarlicPolicyOutputGate.validate(
+            """{"action":"KEEP_CURRENT","profile_id":null,"confidence":"0.9","reason_code":"OK"}""",
+            emptySet()
+        )
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun rejectsNonStringAction() {
+        GarlicPolicyOutputGate.validate(
+            """{"action":7,"profile_id":null,"confidence":0.9,"reason_code":"OK"}""",
+            emptySet()
+        )
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun rejectsNonStringProfileId() {
+        GarlicPolicyOutputGate.validate(
+            """{"action":"PROBE_PROFILE","profile_id":12,"confidence":0.9,"reason_code":"OK"}""",
+            setOf("12")
+        )
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun rejectsMalformedJsonAsPolicyError() {
+        GarlicPolicyOutputGate.validate(
+            """{"action":"KEEP_CURRENT","profile_id":null,"confidence":0.9,"reason_code":""",
             emptySet()
         )
     }
