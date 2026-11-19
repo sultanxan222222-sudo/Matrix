@@ -11,6 +11,7 @@ android {
         targetSdk = 35
         versionCode = 6
         versionName = "0.5.1"
+        ndkVersion = "27.2.12479018"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         ndk { abiFilters += listOf("arm64-v8a") }
     }
