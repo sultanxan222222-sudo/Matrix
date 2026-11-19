@@ -657,7 +657,9 @@ class MainActivity : Activity() {
                     scheduleAutoHealthCheck(token)
                 } else {
                     try {
-                        if (tunnelUp) wireGuardBackend.setState(matrixTunnel, State.DOWN, null)
+                        // Also send DOWN when our local flag is false: setState(UP) may have
+                        // failed after partially opening the backend interface.
+                        wireGuardBackend.setState(matrixTunnel, State.DOWN, null)
                     } catch (_: Exception) {
                     }
                     tunnelUp = false
@@ -1244,8 +1246,18 @@ class MainActivity : Activity() {
                     }
                 }
             } catch (e: Exception) {
+                // A failed native start may have partially initialized the backend even
+                // though tunnelUp has not yet been updated. Always request an explicit stop.
+                try {
+                    wireGuardBackend.setState(matrixTunnel, State.DOWN, null)
+                } catch (_: Exception) {
+                }
+                tunnelUp = false
+                activeConfig = null
+                activeCandidateId = null
                 runOnUiThread {
                     connectButton.isEnabled = true
+                    connectButton.text = "Подключить VPN"
                     if (manualConnectGeneration.get() == generation) {
                         showError("Ошибка подключения", e.message ?: "Не удалось запустить WireGuard. Проверьте профиль и разрешение Android на VPN.")
                     }
