@@ -64,10 +64,10 @@ if [[ -z "$CLSPV_BIN" ]]; then
 fi
 
 # Compile a small end-to-end verification kernel, then the adapted Qwen3.5 decoder kernel set.
-"$CLSPV_BIN" --arch=spir64 \
+"$CLSPV_BIN" \
   "$ROOT/app/src/main/cpp/garlic/shaders/matrix_probe.cl" \
   -o "$ROOT/app/src/main/assets/garlic/matrix_probe.spv"
-"$CLSPV_BIN" --arch=spir64 \
+"$CLSPV_BIN" \
   "$ROOT/app/src/main/cpp/garlic/shaders/qwen35.cl" \
   -o "$ROOT/app/src/main/assets/garlic/qwen35.spv"
 
