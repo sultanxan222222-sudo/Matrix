@@ -23,6 +23,16 @@ void matrix_cl_destroy(MatrixClRuntime* runtime);
 MatrixClBuffer matrix_cl_create_buffer(MatrixClRuntime* runtime, size_t size,
                                         const void* initial_data,
                                         char* error, size_t error_capacity);
+int matrix_cl_register_region(MatrixClRuntime* runtime, uintptr_t host_address,
+                              size_t size, const void* initial_data,
+                              char* error, size_t error_capacity);
+MatrixClBuffer matrix_cl_lookup_region(MatrixClRuntime* runtime, uintptr_t host_address,
+                                       size_t* bytes_available,
+                                       char* error, size_t error_capacity);
+int matrix_cl_write_address(MatrixClRuntime* runtime, uintptr_t host_address,
+                            size_t size, const void* source);
+int matrix_cl_read_address(MatrixClRuntime* runtime, uintptr_t host_address,
+                           size_t size, void* destination);
 MatrixClBuffer matrix_cl_subbuffer(MatrixClRuntime* runtime, MatrixClBuffer parent,
                                     size_t origin, size_t size,
                                     char* error, size_t error_capacity);
