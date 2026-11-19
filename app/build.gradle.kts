@@ -14,6 +14,12 @@ android {
         ndkVersion = "27.2.12479018"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         ndk { abiFilters += listOf("arm64-v8a") }
+        externalNativeBuild {
+            cmake {
+                // clvk's OpenCL runtime depends on the shared Android C++ runtime.
+                arguments += listOf("-DANDROID_STL=c++_shared")
+            }
+        }
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
@@ -25,8 +31,6 @@ android {
         cmake {
             path = file("src/main/cpp/CMakeLists.txt")
             version = "3.22.1"
-            // clvk's OpenCL runtime is linked against the shared NDK C++ runtime.
-            arguments += listOf("-DANDROID_STL=c++_shared")
         }
     }
 }
