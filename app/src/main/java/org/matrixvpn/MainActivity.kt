@@ -24,6 +24,12 @@ import org.amnezia.awg.backend.Tunnel.State
 import org.amnezia.awg.config.Config
 import org.matrixvpn.network.NetworkWatcher
 import org.matrixvpn.network.TunnelConnectivityProbe
+import org.matrixvpn.ai.GarlicMatrixPolicy
+import org.matrixvpn.ai.GarlicModelPackInstaller
+import org.matrixvpn.ai.GarlicPolicyOutputGate
+import org.json.JSONObject
+import org.json.JSONArray
+import java.io.File
 import org.matrixvpn.profile.ImportedVpnProfile
 import org.matrixvpn.profile.VpnProfileInspector
 import java.io.ByteArrayInputStream
@@ -33,7 +39,11 @@ class MainActivity : Activity() {
     private lateinit var networkStatus: TextView
     private lateinit var connectButton: Button
     private lateinit var networkWatcher: NetworkWatcher
+    private lateinit var aiStatus: TextView
     private val pickProfileRequest = 4102
+    private val modelPackRequest = 4110
+    private val modelPackInstaller by lazy { GarlicModelPackInstaller(applicationContext) }
+    private var garlicPolicy: GarlicMatrixPolicy? = null
     private val vpnPermissionRequest = 4103
     private val tunnelActions = object : TunnelActionHandler {
         override fun runPreUp(scripts: MutableCollection<String>) {}
@@ -131,6 +141,8 @@ class MainActivity : Activity() {
             addView(connectionHeading)
             addView(status, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
             addView(networkStatus, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+            addView(aiStatus, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+            addView(installAiButton, menuButtonParams())
             addView(pasteButton, menuButtonParams())
             addView(importButton, menuButtonParams())
             addView(findVpnButton, menuButtonParams())
@@ -144,7 +156,7 @@ class MainActivity : Activity() {
             setBackgroundColor(Color.rgb(4, 12, 7))
             addView(menuContent, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         }
-        listOf(importButton, findWireGuardButton, findVpnButton, pasteButton, connectButton).forEach { button ->
+        listOf(importButton, findWireGuardButton, findVpnButton, pasteButton, connectButton, installAiButton).forEach { button ->
             button.backgroundTintList = ColorStateList.valueOf(Color.rgb(0, 110, 40))
             button.setTextColor(Color.WHITE)
             button.textSize = 14f
@@ -168,6 +180,105 @@ class MainActivity : Activity() {
     override fun onStop() {
         networkWatcher.stop()
         super.onStop()
+    }
+
+    override fun onDestroy() {
+        garlicPolicy?.close()
+        garlicPolicy = null
+        super.onDestroy()
+    }
+
+    private fun chooseGarlicModelPack() {
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "application/zip"
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        try {
+            startActivityForResult(intent, modelPackRequest)
+        } catch (_: android.content.ActivityNotFoundException) {
+            val fallback = Intent(Intent.ACTION_GET_CONTENT).apply {
+                addCategory(Intent.CATEGORY_OPENABLE)
+                type = "*/*"
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            try {
+                startActivityForResult(Intent.createChooser(fallback, "Выберите архив модели MATRIX AI"), modelPackRequest)
+            } catch (e: Exception) {
+                showError("Выбор архива недоступен", e.message ?: "Android не смог открыть выбор файлов.")
+            }
+        } catch (e: Exception) {
+            showError("Не удалось открыть выбор файлов", e.message ?: "Попробуйте ещё раз.")
+        }
+    }
+
+    private fun installGarlicModelPack(uri: Uri) {
+        aiStatus.text = "MATRIX AI: проверка архива и установка модели…"
+        modelPackInstaller.install(uri).whenComplete { result, error ->
+            runOnUiThread {
+                if (error != null) {
+                    aiStatus.text = "MATRIX AI: установка не завершена"
+                    showError("Не удалось установить модель", error.cause?.message ?: error.message ?: "Проверка модели не пройдена.")
+                } else {
+                    aiStatus.text = "MATRIX AI: ${result.modelName}, SHA-256 проверен"
+                    initializeGarlicPolicy(File(result.directory))
+                }
+            }
+        }
+    }
+
+    private fun initializeGarlicPolicy(modelDirectory: File) {
+        garlicPolicy?.close()
+        val policy = GarlicMatrixPolicy(applicationContext, modelDirectory)
+        garlicPolicy = policy
+        aiStatus.text = "MATRIX AI: запуск Garlic на GPU…"
+        policy.initialize().whenComplete { initialized, error ->
+            runOnUiThread {
+                if (error != null) {
+                    aiStatus.text = "MATRIX AI: движок пока не готов"
+                    showError(
+                        "Garlic не запустился",
+                        error.cause?.message ?: error.message ?: "Не удалось запустить внутренний GPU-модуль."
+                    )
+                } else {
+                    aiStatus.text = "MATRIX AI: Garlic готов • ${initialized.deviceAbi}"
+                }
+            }
+        }
+    }
+
+    private fun requestGarlicNetworkAssessment(probe: org.matrixvpn.network.TunnelProbeResult) {
+        val policy = garlicPolicy ?: return
+        val observation = JSONObject()
+            .put("tunnel_active", tunnelUp)
+            .put("external_https_reachable", probe.reachable)
+            .put("external_https_rtt_ms", probe.latencyMillis ?: JSONObject.NULL)
+            .put("external_http_status", probe.httpCode ?: JSONObject.NULL)
+            .put("warp_status", probe.warpStatus ?: JSONObject.NULL)
+            .put("candidate_profile_ids", JSONArray())
+            .put("policy_scope", "network_health_only")
+            .toString()
+
+        policy.assess(observation).whenComplete { raw, error ->
+            if (error != null) {
+                runOnUiThread { aiStatus.text = "MATRIX AI: проверка сети не завершилась" }
+                return@whenComplete
+            }
+            try {
+                // No alternate profiles are configured in this check. The gate therefore
+                // permits only KEEP_CURRENT and rejects any invented failover candidate.
+                val advice = GarlicPolicyOutputGate.validate(raw, emptySet())
+                runOnUiThread {
+                    aiStatus.text = if (advice.action == GarlicPolicyOutputGate.Action.KEEP_CURRENT) {
+                        "MATRIX AI: оставить текущий маршрут • ${advice.reasonCode}"
+                    } else {
+                        "MATRIX AI: запрос отклонён защитным контроллером"
+                    }
+                }
+            } catch (_: Exception) {
+                runOnUiThread { aiStatus.text = "MATRIX AI: ответ отклонён защитным контроллером" }
+            }
+        }
     }
 
 
@@ -509,6 +620,7 @@ class MainActivity : Activity() {
                 wireGuardBackend.setState(matrixTunnel, State.UP, config)
                 val probe = TunnelConnectivityProbe.check()
                 runOnUiThread {
+                    requestGarlicNetworkAssessment(probe)
                     status.text = if (probe.reachable) {
                         "VPN-туннель запущен\n${probe.message}\nПодтверждение рукопожатия с сервером отдельно не проверено."
                     } else {
@@ -533,6 +645,13 @@ class MainActivity : Activity() {
     @Deprecated("Используется системный выбор файлов для совместимости с разными версиями Android.")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == modelPackRequest) {
+            if (resultCode == RESULT_OK) {
+                val uri = data?.data
+                if (uri != null) installGarlicModelPack(uri)
+            }
+            return
+        }
         if (requestCode == vpnPermissionRequest) {
             if (resultCode == RESULT_OK) startWireGuardTunnel()
             else showError("Разрешение VPN не предоставлено", "Android не разрешил приложению MATRIX создать VPN-туннель.")
