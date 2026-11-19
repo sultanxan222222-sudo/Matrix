@@ -44,6 +44,7 @@ class GarlicAndroidBackend : Closeable {
                         ProbeResult(
                             ready = json.optBoolean("ready", false),
                             passed = json.optString("probe") == "passed",
+                            garlicKernelPassed = json.optBoolean("garlic_kernel_passed", false),
                             platform = json.optString("platform").takeIf { it.isNotBlank() },
                             device = json.optString("device").takeIf { it.isNotBlank() },
                             deviceVersion = json.optString("device_version").takeIf { it.isNotBlank() },
@@ -83,6 +84,7 @@ class GarlicAndroidBackend : Closeable {
     data class ProbeResult(
         val ready: Boolean,
         val passed: Boolean,
+        val garlicKernelPassed: Boolean = false,
         val platform: String? = null,
         val device: String? = null,
         val deviceVersion: String? = null,
