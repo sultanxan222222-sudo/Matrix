@@ -36,6 +36,10 @@ else
   git -C "$CLVK_DIR" submodule update --init --recursive
 fi
 
+# MATRIX uses precompiled SPIR-V produced by host clspv. Patch clvk so its Android
+# runtime accepts that IL directly instead of needing LLVM/clspv executables on-device.
+python3 "$ROOT/native/garlic_android/patch_clvk_for_precompiled_il.py" "$CLVK_DIR"
+
 # clvk pins compatible clspv, SPIR-V and OpenCL-Headers revisions in git submodules.
 # clspv's LLVM/Clang/libclc source is fetched at the exact commit in its deps.json.
 (
