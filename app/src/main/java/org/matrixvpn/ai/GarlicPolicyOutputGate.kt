@@ -8,7 +8,7 @@ import org.json.JSONObject
  * is returned to the VPN host. The gate never executes tunnel actions.
  */
 object GarlicPolicyOutputGate {
-    enum class Action { KEEP_CURRENT, PROBE_PROFILE, PROPOSE_FAILOVER }
+    enum class Action { KEEP_CURRENT, CONNECT_PROFILE, PROBE_PROFILE, PROPOSE_FAILOVER }
 
     data class Advice(
         val action: Action,
@@ -35,6 +35,7 @@ object GarlicPolicyOutputGate {
             ?: throw IllegalArgumentException("Garlic returned a non-string action.")
         val action = when (actionText) {
             "KEEP_CURRENT" -> Action.KEEP_CURRENT
+            "CONNECT_PROFILE" -> Action.CONNECT_PROFILE
             "PROBE_PROFILE" -> Action.PROBE_PROFILE
             "PROPOSE_FAILOVER" -> Action.PROPOSE_FAILOVER
             else -> throw IllegalArgumentException("Garlic returned a forbidden policy action.")
@@ -70,7 +71,7 @@ object GarlicPolicyOutputGate {
             Action.KEEP_CURRENT -> require(profileId == null) {
                 "KEEP_CURRENT cannot name another profile."
             }
-            Action.PROBE_PROFILE, Action.PROPOSE_FAILOVER -> {
+            Action.CONNECT_PROFILE, Action.PROBE_PROFILE, Action.PROPOSE_FAILOVER -> {
                 require(profileId != null && profileId in allowedCandidateIds) {
                     "Garlic attempted to use a profile that MATRIX did not authorize."
                 }
