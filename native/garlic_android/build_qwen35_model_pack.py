@@ -84,14 +84,17 @@ def main() -> None:
         data = np.ascontiguousarray(values, dtype=np.float32).tobytes()
         offset = put_aligned(out, index, offset, key, data, n=int(values.size))
 
-    def put_q4(out, key: str, matrix: np.ndarray) -> None:
+    def put_q4(out, key: str, matrix: np.ndarray, fmt: str = "q4") -> None:
         nonlocal offset
         matrix = np.ascontiguousarray(matrix, dtype=np.float32)
         if matrix.ndim != 2 or matrix.shape[1] % 32:
             raise ValueError(f"{key}: Q4 matrix shape must be [rows, cols divisible by 32], got {matrix.shape}")
         # Garlic Q4i stores rows in 64-row tiles. Pad output rows with exact zero weights;
         # Qwen's layer dimensions still govern which projected channels the engine consumes.
-        if matrix.shape[0] % 64:
+        # Q4i matrices are tiled in 64 rows. The embedding is deliberately kept in
+        # Garlic's original row-major q4row layout: the CPU fetches just the requested
+        # row and uploads that activation, avoiding a single 140+ MiB mobile GPU buffer.
+        if fmt == "q4i" and matrix.shape[0] % 64:
             padded_rows = ((matrix.shape[0] + 63) // 64) * 64
             padded = np.zeros((padded_rows, matrix.shape[1]), dtype=np.float32)
             padded[:matrix.shape[0], :] = matrix
@@ -101,7 +104,7 @@ def main() -> None:
         offset = put_aligned(
             out, index, offset, key, payload,
             rows=int(matrix.shape[0]), cols=int(matrix.shape[1]),
-            scales=int(packed.nbytes), fmt="q4"
+            scales=int(packed.nbytes), fmt=fmt
         )
 
     prefix = "model.language_model."
@@ -115,7 +118,7 @@ def main() -> None:
 
     print(f"Converting {MODEL_REPO}: {cfg['num_hidden_layers']} layers, hidden={hidden}, vocab={cfg['vocab_size']}")
     with source_bin.open("wb") as out:
-        put_q4(out, "embed", get(prefix + "embed_tokens.weight"))
+        put_q4(out, "embed", get(prefix + "embed_tokens.weight"), fmt="q4row")
         put_f32(out, "final_norm", 1.0 + get(prefix + "norm.weight"))
 
         for layer, kind in enumerate(cfg["layer_types"]):
@@ -190,6 +193,9 @@ def main() -> None:
                 nibble_bytes, scale_bytes = interleave_q4(packed, scales)
                 payload = nibble_bytes + scale_bytes
                 tensor["fmt"] = "q4i"
+            elif tensor.get("fmt") == "q4row":
+                # Keep Q4 row-major bytes for Garlic's CPU-embedding path.
+                pass
             dst.write(payload)
             position = int(tensor["offset"]) + int(tensor["size"])
     q4i_meta["size"] = q4i_bin.stat().st_size
