@@ -697,7 +697,7 @@ class MainActivity : Activity() {
             var connection: java.net.HttpURLConnection? = null
             var usedEndpointLab = false
             try {
-                var json: JSONObject? = null
+                var responseJson: JSONObject? = null
                 var lastServiceError = "Сервис WARP не ответил."
                 // Prefer distinct, recently checked endpoints. If Lab has no fresh pool,
                 // explicitly retry the generator's documented hostname mode.
@@ -719,7 +719,7 @@ class MainActivity : Activity() {
                     val response = stream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
                     require(response.length <= 1_000_000) { "Ответ сервиса слишком большой." }
                     if (code in 200..299) {
-                        json = JSONObject(response)
+                        responseJson = JSONObject(response)
                         usedEndpointLab = endpointMode == "lab"
                         break
                     }
@@ -728,7 +728,7 @@ class MainActivity : Activity() {
                         throw IllegalStateException(lastServiceError)
                     }
                 }
-                val json = json ?: throw IllegalStateException(lastServiceError)
+                val json = responseJson ?: throw IllegalStateException(lastServiceError)
                 if (!json.optBoolean("success", true)) {
                     throw IllegalStateException(json.optString("error").ifBlank { "Сервис не смог создать профили WARP." })
                 }
