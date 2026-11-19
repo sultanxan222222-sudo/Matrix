@@ -1732,44 +1732,12 @@ class MainActivity : Activity() {
 
     private fun connectOrDisconnect() {
         if (engineSwitchInProgress || autoRecoveryInProgress) return
-        if (isOpenVpnActive()) {
-            manualDisconnectInProgress = true
-            engineSwitchInProgress = true
-            connectButton.isEnabled = false
-            warpModeButton.isEnabled = false
-            MatrixVpnService.stop(this)
-            return
-        }
-        if (isWireGuardActive()) {
-            manualDisconnectInProgress = true
-            engineSwitchInProgress = true
-            connectButton.isEnabled = false
-            warpModeButton.isEnabled = false
-            Thread {
-                try {
-                    wireGuardBackend.setState(matrixTunnel, State.DOWN, null)
-                    runOnUiThread {
-                        manualDisconnectInProgress = false
-                        engineSwitchInProgress = false
-                        status.text = "VPN-туннель: отключён"
-                        connectButton.isEnabled = true
-                        warpModeButton.isEnabled = true
-                        refreshModeButtons()
-                    }
-                } catch (e: Exception) {
-                    runOnUiThread {
-                        manualDisconnectInProgress = false
-                        engineSwitchInProgress = false
-                        connectButton.isEnabled = true
-                        warpModeButton.isEnabled = true
-                        showError("Не удалось отключить VPN", e.message ?: "Не удалось остановить туннель.")
-                    }
-                }
-            }.start()
+        if (isOpenVpnActive() || isWireGuardActive()) {
+            emergencyStopAiAndVpn()
             return
         }
         if (openVpnProfileText == null && wireGuardConfig == null) {
-            showError("Нет профиля VPN", "Сначала импортируйте OpenVPN, WireGuard или AmneziaWG .conf.")
+            showError("Нет профиля VPN", "Сначала выберите WARP, найдите VPN или импортируйте профиль.")
             return
         }
         beginGarlicAutopilotSession()
