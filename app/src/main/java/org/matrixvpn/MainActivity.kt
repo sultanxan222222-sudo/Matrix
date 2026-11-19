@@ -263,7 +263,7 @@ class MainActivity : Activity() {
             fistIconAnimation = drawable as? Animatable
         }
         val menuSubtitle = TextView(this).apply {
-            text = "PRIVATE NETWORK  /  0.8.1"
+            text = "PRIVATE NETWORK  /  0.8.2"
             textSize = 11f
             letterSpacing = 0.18f
             setTextColor(Color.rgb(166, 210, 190))
@@ -273,7 +273,7 @@ class MainActivity : Activity() {
         val connectionHeading = sectionHeading("СОСТОЯНИЕ СОЕДИНЕНИЯ")
         val helpHeading = sectionHeading("СПРАВКА")
         status = TextView(this).apply {
-            text = "MATRIX GLASS  •  0.8.1\nVPN-туннель: не подключён\nOpenVPN 3 Core + AmneziaWG готовы к работе"
+            text = "MATRIX GLASS  •  0.8.2\nVPN-туннель: не подключён\nOpenVPN 3 Core + AmneziaWG готовы к работе"
             textSize = 16f
             setTextColor(Color.WHITE)
             gravity = Gravity.CENTER
