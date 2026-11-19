@@ -308,6 +308,268 @@ class MainActivity : Activity() {
         }
     }
 
+    /**
+     * Starts host-authorized automatic VPN selection. The user explicitly enables
+     * this mode; the separate emergency-stop control always has priority.
+     */
+    private fun startAiAutopilot() {
+        if (!garlicReady || garlicPolicy == null) {
+            showError(
+                "MATRIX AI ещё не готов",
+                "Сначала установите модель Garlic и дождитесь статуса «Garlic готов». Без работающей модели автоподключение не запускается."
+            )
+            return
+        }
+        val token = autopilotLatch.enable()
+        autoConnectToken = token
+        autoVpnButton.isEnabled = false
+        autoVpnButton.text = "MATRIX AI: подбирает варианты…"
+        aiStatus.text = "MATRIX AI: автоматический подбор разрешён"
+        if (vpnCandidates.isEmpty()) {
+            fetchWarpCandidates(autoStart = true, token = token)
+        } else {
+            requestAutoVpnPermission(token)
+        }
+    }
+
+    private fun requestAutoVpnPermission(token: Long) {
+        if (!autopilotLatch.isActive(token)) return
+        val permissionIntent = VpnService.prepare(this)
+        if (permissionIntent != null) {
+            pendingAutoConnect = true
+            autoConnectToken = token
+            try {
+                startActivityForResult(permissionIntent, vpnPermissionRequest)
+            } catch (error: Exception) {
+                pendingAutoConnect = false
+                autopilotLatch.emergencyStop()
+                autoVpnButton.isEnabled = true
+                showError("Не удалось запросить разрешение VPN", error.message ?: "Android не открыл системное окно VPN.")
+            }
+        } else {
+            pendingAutoConnect = false
+            requestAutomaticCandidateSelection(emptySet(), null, token)
+        }
+    }
+
+    private fun requestAutomaticCandidateSelection(
+        excludedIds: Set<String>,
+        lastProbe: org.matrixvpn.network.TunnelProbeResult?,
+        token: Long
+    ) {
+        if (!autopilotLatch.isActive(token)) return
+        val policy = garlicPolicy
+        if (!garlicReady || policy == null) {
+            runOnUiThread { aiStatus.text = "MATRIX AI: модель недоступна — автоподбор остановлен" }
+            autopilotLatch.emergencyStop()
+            return
+        }
+        val remaining = vpnCandidates.values.filter { it.id !in excludedIds }
+        if (remaining.isEmpty()) {
+            runOnUiThread {
+                aiStatus.text = "MATRIX AI: проверены все варианты, рабочего маршрута не найдено"
+                status.text = "VPN отключён: все доступные кандидаты не прошли проверку."
+                autoVpnButton.isEnabled = true
+                autoVpnButton.text = "MATRIX AI — повторить подбор"
+            }
+            autopilotLatch.emergencyStop()
+            return
+        }
+
+        val allowedIds = remaining.map { it.id }.toSet()
+        val candidateJson = JSONArray().apply { remaining.forEach { put(it.id) } }
+        val excludedJson = JSONArray().apply { excludedIds.forEach { put(it) } }
+        val observation = JSONObject()
+            .put("policy_scope", "vpn_candidate_selection")
+            .put("automatic_connection_authorized", true)
+            .put("tunnel_active", tunnelUp)
+            .put("current_profile_id", activeCandidateId ?: JSONObject.NULL)
+            .put("connectivity_known", lastProbe != null)
+            .put("external_https_reachable", lastProbe?.reachable ?: false)
+            .put("external_https_rtt_ms", lastProbe?.latencyMillis ?: JSONObject.NULL)
+            .put("external_http_status", lastProbe?.httpCode ?: JSONObject.NULL)
+            .put("candidate_count", remaining.size)
+            .put("candidate_profile_ids", candidateJson)
+            .put("failed_profile_ids", excludedJson)
+            .toString()
+
+        aiStatus.text = "MATRIX AI: Garlic оценивает ${remaining.size} разрешённых вариантов…"
+        policy.assess(observation).whenComplete { raw, error ->
+            if (!autopilotLatch.isActive(token)) return@whenComplete
+            if (error != null) {
+                runOnUiThread {
+                    aiStatus.text = "MATRIX AI: не удалось оценить VPN-кандидатов"
+                    autoVpnButton.isEnabled = true
+                    autoVpnButton.text = "MATRIX AI — повторить подбор"
+                }
+                autopilotLatch.emergencyStop()
+                return@whenComplete
+            }
+            try {
+                val advice = GarlicPolicyOutputGate.validate(raw, allowedIds)
+                if (advice.confidence < 0.60) {
+                    throw IllegalArgumentException("Garlic не набрал достаточную уверенность для подключения.")
+                }
+                when (advice.action) {
+                    GarlicPolicyOutputGate.Action.KEEP_CURRENT -> {
+                        if (!tunnelUp) {
+                            throw IllegalArgumentException("Garlic предложил оставить маршрут, хотя активного туннеля нет.")
+                        }
+                        runOnUiThread {
+                            aiStatus.text = "MATRIX AI: текущий VPN оставлен • ${advice.reasonCode}"
+                            autoVpnButton.isEnabled = true
+                            autoVpnButton.text = "MATRIX AI — автоподбор включён"
+                        }
+                    }
+                    GarlicPolicyOutputGate.Action.CONNECT_PROFILE,
+                    GarlicPolicyOutputGate.Action.PROBE_PROFILE,
+                    GarlicPolicyOutputGate.Action.PROPOSE_FAILOVER -> {
+                        val id = advice.profileId ?: throw IllegalArgumentException("Garlic не указал VPN-кандидата.")
+                        val candidate = remaining.firstOrNull { it.id == id }
+                            ?: throw IllegalArgumentException("MATRIX не нашёл разрешённый профиль-кандидат.")
+                        activateAutomaticCandidate(candidate, excludedIds, token)
+                    }
+                }
+            } catch (validationError: Exception) {
+                runOnUiThread {
+                    aiStatus.text = "MATRIX AI: решение не прошло проверку безопасности"
+                    autoVpnButton.isEnabled = true
+                    autoVpnButton.text = "MATRIX AI — повторить подбор"
+                }
+                autopilotLatch.emergencyStop()
+            }
+        }
+    }
+
+    private fun activateAutomaticCandidate(
+        candidate: VpnCandidate,
+        excludedIds: Set<String>,
+        token: Long
+    ) {
+        vpnExecutor.execute {
+            if (!autopilotLatch.isActive(token)) return@execute
+            val previousConfig = activeConfig
+            val previousId = activeCandidateId
+            try {
+                // The existing backend owns one tunnel name. Reconfigure it in a serialized
+                // operation, and restore the previous known-good profile if the new one fails.
+                if (tunnelUp) {
+                    wireGuardBackend.setState(matrixTunnel, State.DOWN, null)
+                    tunnelUp = false
+                }
+                if (!autopilotLatch.isActive(token)) return@execute
+
+                wireGuardBackend.setState(matrixTunnel, State.UP, candidate.config)
+                activeConfig = candidate.config
+                activeCandidateId = candidate.id
+                wireGuardConfig = candidate.config
+                tunnelUp = true
+
+                if (!autopilotLatch.isActive(token)) {
+                    wireGuardBackend.setState(matrixTunnel, State.DOWN, null)
+                    tunnelUp = false
+                    activeConfig = null
+                    activeCandidateId = null
+                    return@execute
+                }
+
+                val probe = TunnelConnectivityProbe.check()
+                if (!autopilotLatch.isActive(token)) {
+                    wireGuardBackend.setState(matrixTunnel, State.DOWN, null)
+                    tunnelUp = false
+                    activeConfig = null
+                    activeCandidateId = null
+                    return@execute
+                }
+
+                if (probe.reachable) {
+                    runOnUiThread {
+                        if (!autopilotLatch.isActive(token)) return@runOnUiThread
+                        status.text = "VPN подключён автоматически\n${candidate.label}\n${probe.message}"
+                        aiStatus.text = "MATRIX AI: выбран маршрут • ${candidate.id}"
+                        connectButton.isEnabled = true
+                        connectButton.text = "Отключить VPN"
+                        autoVpnButton.isEnabled = true
+                        autoVpnButton.text = "MATRIX AI — автоподбор включён"
+                    }
+                    return@execute
+                }
+
+                wireGuardBackend.setState(matrixTunnel, State.DOWN, null)
+                tunnelUp = false
+                activeConfig = null
+                activeCandidateId = null
+
+                // Restore the last known-good tunnel before asking Garlic for another candidate.
+                if (previousConfig != null && autopilotLatch.isActive(token)) {
+                    wireGuardBackend.setState(matrixTunnel, State.UP, previousConfig)
+                    activeConfig = previousConfig
+                    activeCandidateId = previousId
+                    tunnelUp = true
+                }
+                val failed = excludedIds + candidate.id
+                runOnUiThread {
+                    if (autopilotLatch.isActive(token)) {
+                        aiStatus.text = "MATRIX AI: ${candidate.id} не прошёл HTTPS-проверку, выбирается следующий"
+                    }
+                }
+                requestAutomaticCandidateSelection(failed, probe, token)
+            } catch (error: Exception) {
+                try {
+                    if (tunnelUp) wireGuardBackend.setState(matrixTunnel, State.DOWN, null)
+                    tunnelUp = false
+                    activeConfig = null
+                    activeCandidateId = null
+                    if (previousConfig != null && autopilotLatch.isActive(token)) {
+                        wireGuardBackend.setState(matrixTunnel, State.UP, previousConfig)
+                        activeConfig = previousConfig
+                        activeCandidateId = previousId
+                        tunnelUp = true
+                    }
+                } catch (_: Exception) {
+                    // A failed restore must never bypass the user's emergency stop.
+                }
+                val failed = excludedIds + candidate.id
+                if (autopilotLatch.isActive(token)) {
+                    runOnUiThread { aiStatus.text = "MATRIX AI: кандидат не подключился; проверяется следующий" }
+                    requestAutomaticCandidateSelection(failed, null, token)
+                }
+            }
+        }
+    }
+
+    /**
+     * Human-owned kill control. It invalidates all pending Garlic decisions first,
+     * then serially stops the tunnel after any in-flight backend call completes.
+     */
+    private fun emergencyStopVpn() {
+        pendingAutoConnect = false
+        autoConnectToken = autopilotLatch.emergencyStop()
+        autoVpnButton.isEnabled = true
+        autoVpnButton.text = "MATRIX AI — запуск по команде"
+        aiStatus.text = "MATRIX AI: автоподключение остановлено пользователем"
+        status.text = "Аварийная остановка VPN…"
+        vpnExecutor.execute {
+            try {
+                wireGuardBackend.setState(matrixTunnel, State.DOWN, null)
+                tunnelUp = false
+                activeConfig = null
+                activeCandidateId = null
+                runOnUiThread {
+                    status.text = "VPN полностью отключён. Автоподключение заблокировано."
+                    connectButton.text = "Подключить выбранный VPN"
+                    connectButton.isEnabled = wireGuardConfig != null
+                    emergencyStopButton.text = "VPN ОТКЛЮЧЁН • АВТОПОДКЛЮЧЕНИЕ ЗАБЛОКИРОВАНО"
+                }
+            } catch (error: Exception) {
+                runOnUiThread {
+                    status.text = "Не удалось подтвердить отключение VPN"
+                    showError("Аварийное отключение не подтверждено", error.message ?: "Проверьте состояние VPN в Android.")
+                }
+            }
+        }
+    }
+
     private fun requestGarlicNetworkAssessment(probe: org.matrixvpn.network.TunnelProbeResult) {
         val policy = garlicPolicy ?: return
         val observation = JSONObject()
