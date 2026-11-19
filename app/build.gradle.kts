@@ -25,6 +25,8 @@ android {
         cmake {
             path = file("src/main/cpp/CMakeLists.txt")
             version = "3.22.1"
+            // clvk's OpenCL runtime is linked against the shared NDK C++ runtime.
+            arguments += listOf("-DANDROID_STL=c++_shared")
         }
     }
 }
