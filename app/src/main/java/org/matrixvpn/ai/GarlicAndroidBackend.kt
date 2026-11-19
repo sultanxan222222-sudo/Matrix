@@ -44,9 +44,9 @@ class GarlicAndroidBackend : Closeable {
                         ProbeResult(
                             ready = json.optBoolean("ready", false),
                             passed = json.optString("probe") == "passed",
-                            platform = json.optString("platform").ifBlank { null },
-                            device = json.optString("device").ifBlank { null },
-                            deviceVersion = json.optString("device_version").ifBlank { null },
+                            platform = json.optString("platform").takeIf { it.isNotBlank() },
+                            device = json.optString("device").takeIf { it.isNotBlank() },
+                            deviceVersion = json.optString("device_version").takeIf { it.isNotBlank() },
                             computeUnits = json.optInt("compute_units").takeIf { it > 0 },
                             maxWorkGroup = json.optLong("max_work_group").takeIf { it > 0L },
                             globalMemoryBytes = json.optLong("global_memory_bytes").takeIf { it > 0L },
