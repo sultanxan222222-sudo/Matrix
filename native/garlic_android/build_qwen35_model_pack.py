@@ -89,6 +89,13 @@ def main() -> None:
         matrix = np.ascontiguousarray(matrix, dtype=np.float32)
         if matrix.ndim != 2 or matrix.shape[1] % 32:
             raise ValueError(f"{key}: Q4 matrix shape must be [rows, cols divisible by 32], got {matrix.shape}")
+        # Garlic Q4i stores rows in 64-row tiles. Pad output rows with exact zero weights;
+        # Qwen's layer dimensions still govern which projected channels the engine consumes.
+        if matrix.shape[0] % 64:
+            padded_rows = ((matrix.shape[0] + 63) // 64) * 64
+            padded = np.zeros((padded_rows, matrix.shape[1]), dtype=np.float32)
+            padded[:matrix.shape[0], :] = matrix
+            matrix = padded
         packed, scales = quantize_q4(matrix)
         payload = packed.tobytes() + scales.tobytes()
         offset = put_aligned(
@@ -113,8 +120,8 @@ def main() -> None:
 
         for layer, kind in enumerate(cfg["layer_types"]):
             base = f"{prefix}layers.{layer}."
-            put_f32(fout := out, f"{layer}.attn_norm", 1.0 + get(base + "input_layernorm.weight"))
-            put_f32(fout, f"{layer}.mlp_norm", 1.0 + get(base + "post_attention_layernorm.weight"))
+            put_f32(out, f"{layer}.attn_norm", 1.0 + get(base + "input_layernorm.weight"))
+            put_f32(out, f"{layer}.mlp_norm", 1.0 + get(base + "post_attention_layernorm.weight"))
 
             if kind == "full_attention":
                 attention = base + "self_attn."
