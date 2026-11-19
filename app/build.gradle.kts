@@ -36,8 +36,9 @@ android {
 }
 dependencies {
     implementation("androidx.core:core-ktx:1.15.0")
-    // Existing MATRIX AmneziaWG backend is retained and remains responsible for VPN execution.
+    // Keep AmneziaWG/WireGuard and add an independent OpenVPN 3 engine for VPN Gate profiles.
     implementation("com.zaneschepke:amneziawg-android:2.3.7")
+    implementation("io.github.tim06:openvpn:1.1.3")
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.3")
     testImplementation("junit:junit:4.13.2")
     // Use a real JSON implementation in local JVM tests instead of Android's "not mocked" stubs.
