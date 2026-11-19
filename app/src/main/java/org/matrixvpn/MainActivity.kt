@@ -27,19 +27,35 @@ import org.matrixvpn.network.TunnelConnectivityProbe
 import org.matrixvpn.ai.GarlicMatrixPolicy
 import org.matrixvpn.ai.GarlicModelPackInstaller
 import org.matrixvpn.ai.GarlicPolicyOutputGate
+import org.matrixvpn.ai.AutopilotSafetyLatch
 import org.json.JSONObject
 import org.json.JSONArray
 import java.io.File
 import org.matrixvpn.profile.ImportedVpnProfile
 import org.matrixvpn.profile.VpnProfileInspector
 import java.io.ByteArrayInputStream
+import java.util.UUID
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
 
 class MainActivity : Activity() {
     private lateinit var status: TextView
     private lateinit var networkStatus: TextView
     private lateinit var connectButton: Button
+    private lateinit var autoVpnButton: Button
+    private lateinit var emergencyStopButton: Button
     private lateinit var networkWatcher: NetworkWatcher
     private lateinit var aiStatus: TextView
+    private data class VpnCandidate(val id: String, val label: String, val config: Config)
+    private val vpnCandidates = linkedMapOf<String, VpnCandidate>()
+    private val autopilotLatch = AutopilotSafetyLatch()
+    private val vpnExecutor: ExecutorService = Executors.newSingleThreadExecutor { task ->
+        Thread(task, "matrix-vpn-autopilot").apply { isDaemon = true }
+    }
+    @Volatile private var activeConfig: Config? = null
+    @Volatile private var activeCandidateId: String? = null
+    @Volatile private var pendingAutoConnect = false
+    @Volatile private var autoConnectToken = 0L
     private val pickProfileRequest = 4102
     private val modelPackRequest = 4110
     private val modelPackInstaller by lazy { GarlicModelPackInstaller(applicationContext) }
@@ -120,8 +136,16 @@ class MainActivity : Activity() {
             setOnClickListener { chooseVpnProfile() }
         }
         val findWireGuardButton = Button(this).apply {
-            text = "WARP — отдельный режим"
+            text = "Получить до 3 вариантов Cloudflare WARP"
             setOnClickListener { fetchFreeWarpProfile() }
+        }
+        autoVpnButton = Button(this).apply {
+            text = "MATRIX AI — выбрать и подключить VPN"
+            setOnClickListener { startAiAutopilot() }
+        }
+        emergencyStopButton = Button(this).apply {
+            text = "АВАРИЙНО ОТКЛЮЧИТЬ VPN"
+            setOnClickListener { emergencyStopVpn() }
         }
         val findVpnButton = Button(this).apply {
             text = "3. Найти бесплатные VPN-серверы"
@@ -137,7 +161,7 @@ class MainActivity : Activity() {
             setOnClickListener { connectOrDisconnect() }
         }
         val help = TextView(this).apply {
-            text = "Импортируйте конфигурацию из буфера или файл с телефона. WARP работает отдельно. Пункт бесплатных серверов получает актуальный каталог VPN Gate и передаёт OpenVPN-профиль совместимому приложению; встроенное подключение MATRIX пока поддерживает WireGuard/AmneziaWG. Бесплатные серверы добровольцев не гарантируют доступность и конфиденциальность."
+            text = "MATRIX AI может самостоятельно выбрать, проверить и подключить один из разрешённых профилей, а при сбое перейти к другому. Кнопка аварийного отключения останавливает туннель и блокирует повторное подключение до нового нажатия запуска. Генератор WARP создаёт до трёх отдельных профилей одного провайдера Cloudflare; это не три независимые VPN-компании. VPN Gate пока предоставляет OpenVPN-профили для внешнего клиента — встроенному MATRIX ещё нужен OpenVPN-модуль."
             textSize = 13f
             gravity = Gravity.CENTER
             setPadding(8, 12, 8, 12)
@@ -154,6 +178,8 @@ class MainActivity : Activity() {
             addView(networkStatus, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
             addView(aiStatus, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
             addView(installAiButton, menuButtonParams())
+            addView(autoVpnButton, menuButtonParams())
+            addView(emergencyStopButton, menuButtonParams())
             addView(pasteButton, menuButtonParams())
             addView(importButton, menuButtonParams())
             addView(findVpnButton, menuButtonParams())
@@ -167,12 +193,16 @@ class MainActivity : Activity() {
             setBackgroundColor(Color.rgb(4, 12, 7))
             addView(menuContent, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         }
-        listOf(importButton, findWireGuardButton, findVpnButton, pasteButton, connectButton, installAiButton).forEach { button ->
+        listOf(importButton, findWireGuardButton, findVpnButton, pasteButton, connectButton, installAiButton, autoVpnButton).forEach { button ->
             button.backgroundTintList = ColorStateList.valueOf(Color.rgb(0, 110, 40))
             button.setTextColor(Color.WHITE)
             button.textSize = 14f
             button.minHeight = (48 * resources.displayMetrics.density).toInt()
         }
+        emergencyStopButton.backgroundTintList = ColorStateList.valueOf(Color.rgb(180, 24, 35))
+        emergencyStopButton.setTextColor(Color.WHITE)
+        emergencyStopButton.textSize = 14f
+        emergencyStopButton.minHeight = (54 * resources.displayMetrics.density).toInt()
         help.setTextColor(Color.rgb(170, 220, 180))
         setContentView(MatrixRainView(this))
         window.decorView.postDelayed({
@@ -210,6 +240,7 @@ class MainActivity : Activity() {
     override fun onDestroy() {
         garlicPolicy?.close()
         garlicPolicy = null
+        vpnExecutor.shutdown()
         super.onDestroy()
     }
 
