@@ -40,4 +40,6 @@ dependencies {
     implementation("com.zaneschepke:amneziawg-android:2.3.7")
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.3")
     testImplementation("junit:junit:4.13.2")
+    // Use a real JSON implementation in local JVM tests instead of Android's "not mocked" stubs.
+    testImplementation("org.json:json:20240303")
 }
