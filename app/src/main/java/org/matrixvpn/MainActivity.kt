@@ -734,6 +734,14 @@ class MainActivity : Activity() {
         autoVpnButton.text = "MATRIX AI — запуск по команде"
         aiStatus.text = "MATRIX AI: автоподключение остановлено пользователем"
         status.text = "Аварийная остановка VPN…"
+        // Stop the independent OpenVPN 3 service immediately as well. The
+        // WireGuard backend remains serialized on vpnExecutor to avoid racing
+        // an in-flight GoBackend reconfiguration.
+        runCatching {
+            startService(org.matrixvpn.openvpn.MatrixOpenVpnService.stopIntent(this))
+        }.onFailure { error ->
+            aiStatus.text = "MATRIX AI остановлен; команда OpenVPN: ${error.message ?: "ошибка"}"
+        }
         vpnExecutor.execute {
             try {
                 wireGuardBackend.setState(matrixTunnel, State.DOWN, null)
