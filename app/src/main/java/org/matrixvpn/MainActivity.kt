@@ -56,6 +56,8 @@ class MainActivity : Activity() {
     @Volatile private var activeCandidateId: String? = null
     @Volatile private var garlicReady = false
     @Volatile private var pendingAutoConnect = false
+    @Volatile private var pendingAutoPermissionPrompt = false
+    @Volatile private var pendingManualPermissionPrompt = false
     @Volatile private var autoConnectToken = 0L
     private val pickProfileRequest = 4102
     private val modelPackRequest = 4110
@@ -325,6 +327,7 @@ class MainActivity : Activity() {
         autoVpnButton.isEnabled = false
         autoVpnButton.text = "MATRIX AI: подбирает варианты…"
         aiStatus.text = "MATRIX AI: автоматический подбор разрешён"
+        emergencyStopButton.text = "АВАРИЙНО ОТКЛЮЧИТЬ VPN"
         if (vpnCandidates.isEmpty()) {
             fetchWarpCandidates(autoStart = true, token = token)
         } else {
@@ -337,17 +340,21 @@ class MainActivity : Activity() {
         val permissionIntent = VpnService.prepare(this)
         if (permissionIntent != null) {
             pendingAutoConnect = true
+            pendingAutoPermissionPrompt = true
+            pendingManualPermissionPrompt = false
             autoConnectToken = token
             try {
                 startActivityForResult(permissionIntent, vpnPermissionRequest)
             } catch (error: Exception) {
                 pendingAutoConnect = false
+                pendingAutoPermissionPrompt = false
                 autopilotLatch.emergencyStop()
                 autoVpnButton.isEnabled = true
                 showError("Не удалось запросить разрешение VPN", error.message ?: "Android не открыл системное окно VPN.")
             }
         } else {
             pendingAutoConnect = false
+            pendingAutoPermissionPrompt = false
             requestAutomaticCandidateSelection(emptySet(), null, token)
         }
     }
@@ -393,7 +400,7 @@ class MainActivity : Activity() {
             .put("failed_profile_ids", excludedJson)
             .toString()
 
-        aiStatus.text = "MATRIX AI: Garlic оценивает ${remaining.size} разрешённых вариантов…"
+        runOnUiThread { aiStatus.text = "MATRIX AI: Garlic оценивает ${remaining.size} разрешённых вариантов…" }
         policy.assess(observation).whenComplete { raw, error ->
             if (!autopilotLatch.isActive(token)) return@whenComplete
             if (error != null) {
@@ -544,6 +551,7 @@ class MainActivity : Activity() {
      */
     private fun emergencyStopVpn() {
         pendingAutoConnect = false
+        // Keep pendingAutoPermissionPrompt until Android returns from its consent dialog.
         autoConnectToken = autopilotLatch.emergencyStop()
         autoVpnButton.isEnabled = true
         autoVpnButton.text = "MATRIX AI — запуск по команде"
@@ -559,7 +567,7 @@ class MainActivity : Activity() {
                     status.text = "VPN полностью отключён. Автоподключение заблокировано."
                     connectButton.text = "Подключить выбранный VPN"
                     connectButton.isEnabled = wireGuardConfig != null
-                    emergencyStopButton.text = "VPN ОТКЛЮЧЁН • АВТОПОДКЛЮЧЕНИЕ ЗАБЛОКИРОВАНО"
+                    emergencyStopButton.text = "АВАРИЙНО ОТКЛЮЧИТЬ VPN"
                 }
             } catch (error: Exception) {
                 runOnUiThread {
@@ -970,8 +978,14 @@ class MainActivity : Activity() {
             return
         }
         val prepareIntent = VpnService.prepare(this)
-        if (prepareIntent != null) startActivityForResult(prepareIntent, vpnPermissionRequest)
-        else startWireGuardTunnel()
+        if (prepareIntent != null) {
+            pendingManualPermissionPrompt = true
+            pendingAutoPermissionPrompt = false
+            startActivityForResult(prepareIntent, vpnPermissionRequest)
+        } else {
+            pendingManualPermissionPrompt = false
+            startWireGuardTunnel()
+        }
     }
 
     private fun startWireGuardTunnel() {
@@ -1019,21 +1033,27 @@ class MainActivity : Activity() {
             return
         }
         if (requestCode == vpnPermissionRequest) {
-            if (resultCode == RESULT_OK) {
-                if (pendingAutoConnect) {
+            if (pendingAutoPermissionPrompt) {
+                // An emergency stop may be pressed while Android's consent dialog is open.
+                // Never reinterpret a late "Allow" as a manual connection.
+                pendingAutoPermissionPrompt = false
+                val token = autoConnectToken
+                if (resultCode == RESULT_OK && pendingAutoConnect && autopilotLatch.isActive(token)) {
                     pendingAutoConnect = false
-                    val token = autoConnectToken
-                    if (autopilotLatch.isActive(token)) {
-                        requestAutomaticCandidateSelection(emptySet(), null, token)
-                    }
+                    requestAutomaticCandidateSelection(emptySet(), null, token)
                 } else {
-                    startWireGuardTunnel()
+                    pendingAutoConnect = false
+                    if (autopilotLatch.isActive(token)) autopilotLatch.emergencyStop()
+                    autoVpnButton.isEnabled = true
                 }
+            } else if (pendingManualPermissionPrompt && resultCode == RESULT_OK) {
+                pendingManualPermissionPrompt = false
+                startWireGuardTunnel()
             } else {
-                pendingAutoConnect = false
-                autopilotLatch.emergencyStop()
-                autoVpnButton.isEnabled = true
-                showError("Разрешение VPN не предоставлено", "Android не разрешил приложению MATRIX создать VPN-туннель.")
+                pendingManualPermissionPrompt = false
+                if (resultCode != RESULT_OK) {
+                    showError("Разрешение VPN не предоставлено", "Android не разрешил приложению MATRIX создать VPN-туннель.")
+                }
             }
             return
         }
