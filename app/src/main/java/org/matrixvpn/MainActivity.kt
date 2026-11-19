@@ -1313,8 +1313,13 @@ class MainActivity : Activity() {
             connectButton.isEnabled = wireGuardConfig != null
             if (wireGuardConfig != null) {
                 val manualId = "import-${UUID.randomUUID().toString().take(8)}"
-                vpnCandidates[manualId] = VpnCandidate(manualId, "Импортированный профиль", wireGuardConfig!!)
-                aiStatus.text = "MATRIX AI: добавлен новый разрешённый VPN-кандидат"
+                val endpointHint = profile.endpointHints.firstOrNull()?.take(96) ?: "endpoint не указан"
+                vpnCandidates[manualId] = VpnCandidate(
+                    manualId,
+                    "Импортированный $formatLabel • $endpointHint",
+                    wireGuardConfig!!
+                )
+                aiStatus.text = "MATRIX AI: добавлен новый разрешённый VPN-кандидат • $endpointHint"
             }
             val endpointText = if (profile.endpointHints.isEmpty()) "Адрес сервера не найден" else profile.endpointHints.joinToString("\n")
             val details = buildString {
