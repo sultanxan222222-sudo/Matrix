@@ -154,7 +154,9 @@ static int reserve_garlic(Engine* e) {
     const uint64_t available = (uint64_t)pages * (uint64_t)page_size;
     // The CPU pool and the Vulkan/OpenCL mirror coexist. Keep a generous reserve for Android,
     // the VPN tunnel and the graphics driver rather than forcing the phone into memory pressure.
-    if (required > available || required > (available - std::min<uint64_t>(available, 192ull << 20)) / 2ull) {
+    const uint64_t reserve = 192ull << 20;
+    const uint64_t usable = available > reserve ? available - reserve : 0;
+    if (required > available || required > usable / 2ull) {
         fail(e, "Model needs approximately %llu MiB for CPU+GPU memory; Android currently has %llu MiB available.",
              (unsigned long long)(required * 2ull >> 20),
              (unsigned long long)(available >> 20));
@@ -221,7 +223,10 @@ static int load_kernels(Engine* e, const char* dir) {
     // have passed numerical reference tests.
     e->tq = 0;
     e->tq16 = 0;
-    e->swar = 0;
+    if (e->swar) {
+        fail(e, "This Android build does not yet support Garlic's Q4S/Q3S SWAR weight layout.");
+        return -1;
+    }
     e->pf = 0;
     e->pf_off = 1;
 
@@ -229,6 +234,9 @@ static int load_kernels(Engine* e, const char* dir) {
     e->k_embed = kernel(e, embedName);
     e->k_bsum = kernel(e, "block_sums");
     e->k_mvi = kernel(e, "matvec_q4i");
+    e->k_mvi8 = kernel(e, "matvec_q4i8");
+    e->k_mv3 = kernel(e, "matvec_q3i");
+    e->k_mv38 = kernel(e, "matvec_q3i8");
     e->k_copy = kernel(e, "copy_f32");
     e->k_rmsnorm = kernel(e, "rmsnorm");
     e->k_qk = kernel(e, "qk_rope_cache");
@@ -241,7 +249,7 @@ static int load_kernels(Engine* e, const char* dir) {
     e->k_sig = kernel(e, "mul_sigmoid");
     e->k_conv = kernel(e, "conv_silu");
     e->k_delta = kernel(e, "delta_step");
-    if (!e->k_embed || !e->k_bsum || !e->k_mvi || !e->k_copy || !e->k_rmsnorm ||
+    if (!e->k_embed || !e->k_bsum || !e->k_mvi || !e->k_mvi8 || !e->k_mv3 || !e->k_mv38 || !e->k_copy || !e->k_rmsnorm ||
         !e->k_qk || !e->k_attn || !e->k_attn_comb || !e->k_silu || !e->k_add ||
         !e->k_mv || !e->k_sample || !e->k_sig || !e->k_conv || !e->k_delta) {
         fail(e, "The adapted Garlic Qwen3.5 shader module is missing one or more required kernels.");
@@ -324,6 +332,7 @@ static int load_index(Engine* e, const char* dir) {
 
 int engine_init(Engine* e, const char* dir, ProgressFn progress, void* user) {
     memset(e, 0, sizeof(*e));
+    e->fd = -1;
     e->tsc_freq = 1000000000ull;
     if (load_index(e, dir)) return -1;
     if (reserve_garlic(e)) {
@@ -343,10 +352,7 @@ int engine_init(Engine* e, const char* dir, ProgressFn progress, void* user) {
     e->stamps = (volatile uint64_t*)(uintptr_t)gpu_alloc(e, 256);
     if (load_kernels(e, dir)) return -1;
 
-    uint32_t* init = (uint32_t*)(uintptr_t)gpu_alloc(e, 1024);
-    sceGnmDrawInitDefaultHardwareState350(init, 256);
-    memcpy(e->init_state, init, sizeof(e->init_state));
-    if (gpu_selftest(e)) return -1;   // before reading gigabytes of weights: does this console's GPU do the right thing?
+    if (gpu_selftest(e)) return -1;
 
     if (e->tq && (e->head_dim != 256 || e->max_seq != 8192)) e->tq = 0;   // the kernels' shape (qwen35.cl MAX_SEQ)
     // TurboQuant with a kernels.bin whose attn_tq.h takes the split argument: 16K of context, positions 8192.. in
@@ -415,7 +421,7 @@ int engine_init(Engine* e, const char* dir, ProgressFn progress, void* user) {
         snprintf(line, sizeof(line), "[ps4ai] TurboQuant KV cache: %u MiB for 8192 positions (+%u MiB lendable; "
                  "context %u, %u while lent)\n", (unsigned)(n_full * 2 * kb >> 20), (unsigned)(e->kv_split >> 20),
                  e->max_seq, e->lend_ctx);
-        sceKernelDebugOutText(0, line);
+        say("%s", line);
     } else if (e->qwen35) {
         // values in int8 + a float scale per (position, kv head) (V_INT8 in shaders/qwen35.cl); each full layer's
         // k and v in two halves of max_seq / 2 positions (ATTN_SPLIT): the first halves of all the layers in one
@@ -531,7 +537,7 @@ int engine_init(Engine* e, const char* dir, ProgressFn progress, void* user) {
              (unsigned long long)e->weights_size);
         return -1;
     }
-    sceKernelDebugOutText(0, "[ps4ai] model loaded\n");
+    say("Garlic model weights loaded.");
     if (e->head_idx && e->head_idx != e->n_tensors - 1) {   // the row -> token id table (trimmed lm_head)
         const Tensor* t = &e->t[e->n_tensors - 1];
         e->ids = malloc((size_t)t->rows * 4);
@@ -554,9 +560,21 @@ int engine_init(Engine* e, const char* dir, ProgressFn progress, void* user) {
         }
         for (int i = 0; i < ROW_CACHE; i++) e->row_tag[i] = -1;
     }
-    mm_tune(e);   // the batched prompt's product kernels, fastest per shape
+    mm_tune(e);
     swar_tune(e);
     engine_reset(e);
+
+    char cl_error[512] = {0};
+    e->android_cl_memory = matrix_cl_create_buffer(
+        (MatrixClRuntime*)e->android_cl_runtime,
+        (size_t)e->mem_size,
+        e->mem,
+        cl_error,
+        sizeof(cl_error));
+    if (!e->android_cl_memory) {
+        fail(e, "%s", cl_error[0] ? cl_error : "Could not mirror Garlic model pool to Vulkan memory.");
+        return -1;
+    }
     return 0;
 }
 
@@ -1314,7 +1332,7 @@ void engine_close(Engine* e) {
         e->android_cl_runtime = NULL;
         e->android_cl_memory = NULL;
     }
-    if (e->fd > 0) close(e->fd);
+    if (e->fd >= 0) close(e->fd);
     free(e->ids);
     free(e->row_cache);
     free(e->row_tag);
