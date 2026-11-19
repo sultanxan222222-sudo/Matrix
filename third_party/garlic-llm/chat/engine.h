@@ -231,7 +231,7 @@ typedef struct {
     S3G s3;
 #ifdef MATRIX_ANDROID
     void* android_cl_runtime;
-    void* android_cl_memory;
+
 #endif
 } Engine;
 
