@@ -667,16 +667,15 @@ class MainActivity : Activity() {
      * delayed "Allow" result cannot resurrect a tunnel after the user stopped MATRIX.
      */
     private fun requestSelectedProfileVpnPermission() {
-        val token = garlicRunToken.takeIf { garlicProfileSelector.isActive(it) }
+        if (!garlicProfileSelector.isActive(garlicRunToken)) beginGarlicAutopilotSession()
+        val token = garlicRunToken
         pendingGarlicPermissionToken = token
         val permission = VpnService.prepare(this)
         if (permission != null) {
             startActivityForResult(permission, vpnPermissionRequest)
         } else {
             pendingGarlicPermissionToken = null
-            if (token == null || garlicProfileSelector.isActive(token)) {
-                startSelectedVpnTunnel()
-            }
+            if (garlicProfileSelector.isActive(token)) startSelectedVpnTunnel(token)
         }
     }
 
@@ -889,7 +888,11 @@ class MainActivity : Activity() {
     }
 
     /** Stop and verify both engines before starting either one. Android has one VPN slot per user. */
-    private fun startSelectedVpnTunnel() {
+    private fun startSelectedVpnTunnel(token: Long = garlicRunToken) {
+        if (!garlicProfileSelector.isActive(token)) {
+            status.text = "Подключение отменено: автопилот остановлен."
+            return
+        }
         if (engineSwitchInProgress || autoRecoveryInProgress) return
         engineSwitchInProgress = true
         manualDisconnectInProgress = false
@@ -900,7 +903,13 @@ class MainActivity : Activity() {
         Thread {
             val openVpnStopped = stopOpenVpnAndWait(12_000L)
             val wireGuardStopped = openVpnStopped && stopWireGuardAndWait(5_000L)
+            if (!garlicProfileSelector.isActive(token)) {
+                stopOpenVpnAndWait()
+                stopWireGuardAndWait()
+                return@Thread
+            }
             runOnUiThread {
+                if (!garlicProfileSelector.isActive(token)) return@runOnUiThread
                 warpModeButton.isEnabled = true
                 connectButton.isEnabled = true
                 openVpnState = MatrixVpnService.currentState(this)
@@ -915,7 +924,8 @@ class MainActivity : Activity() {
                     return@runOnUiThread
                 }
                 qualityTracker.reset()
-                if (openVpnProfileText != null) startEmbeddedOpenVpnTunnel() else startWireGuardTunnel()
+                if (openVpnProfileText != null) startEmbeddedOpenVpnTunnel(token)
+                else startWireGuardTunnel(token)
             }
         }.start()
     }
@@ -945,7 +955,8 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun startEmbeddedOpenVpnTunnel() {
+    private fun startEmbeddedOpenVpnTunnel(token: Long) {
+        if (!garlicProfileSelector.isActive(token)) return
         val profile = openVpnProfileText
         if (profile.isNullOrBlank()) {
             engineSwitchInProgress = false
@@ -973,32 +984,41 @@ class MainActivity : Activity() {
                 .setMessage("Этот профиль требует имя пользователя и пароль. Данные используются только для текущего подключения.")
                 .setView(fields)
                 .setOnCancelListener {
-                    engineSwitchInProgress = false
-                    connectButton.isEnabled = true
-                    warpModeButton.isEnabled = true
+                    if (garlicProfileSelector.isActive(token)) {
+                        engineSwitchInProgress = false
+                        connectButton.isEnabled = true
+                        warpModeButton.isEnabled = true
+                    }
                 }
                 .setNegativeButton("Отмена") { _, _ ->
-                    engineSwitchInProgress = false
-                    connectButton.isEnabled = true
-                    warpModeButton.isEnabled = true
+                    if (garlicProfileSelector.isActive(token)) {
+                        engineSwitchInProgress = false
+                        connectButton.isEnabled = true
+                        warpModeButton.isEnabled = true
+                    }
                 }
                 .setPositiveButton("Подключить") { _, _ ->
-                    launchEmbeddedOpenVpn(profile, username.text.toString(), password.text.toString())
+                    launchEmbeddedOpenVpn(profile, username.text.toString(), password.text.toString(), token)
                 }
                 .show()
             return
         }
         val user = if (activeProfileProvider.equals("VPN Gate", true)) "vpn" else ""
         val pass = if (activeProfileProvider.equals("VPN Gate", true)) "vpn" else ""
-        launchEmbeddedOpenVpn(profile, user, pass)
+        launchEmbeddedOpenVpn(profile, user, pass, token)
     }
 
-    private fun launchEmbeddedOpenVpn(profile: String, username: String, password: String) {
+    private fun launchEmbeddedOpenVpn(profile: String, username: String, password: String, token: Long) {
+        if (!garlicProfileSelector.isActive(token)) return
         try {
             pendingOpenVpnStart = false
             status.text = "Запуск встроенного OpenVPN 3…\nСервер: $activeProfileName"
             connectButton.isEnabled = false
             MatrixVpnService.start(this, profile, username, password)
+            if (!garlicProfileSelector.isActive(token)) {
+                MatrixVpnService.stop(this)
+                return
+            }
             openVpnRunning = true
             openVpnState = MatrixVpnService.STATE_CONNECTING
             engineSwitchInProgress = false
@@ -1752,12 +1772,19 @@ class MainActivity : Activity() {
             showError("Нет профиля VPN", "Сначала импортируйте OpenVPN, WireGuard или AmneziaWG .conf.")
             return
         }
+        beginGarlicAutopilotSession()
+        val token = garlicRunToken
         val prepareIntent = VpnService.prepare(this)
-        if (prepareIntent != null) startActivityForResult(prepareIntent, vpnPermissionRequest)
-        else startSelectedVpnTunnel()
+        if (prepareIntent != null) {
+            pendingGarlicPermissionToken = token
+            startActivityForResult(prepareIntent, vpnPermissionRequest)
+        } else {
+            startSelectedVpnTunnel(token)
+        }
     }
 
-    private fun startWireGuardTunnel() {
+    private fun startWireGuardTunnel(token: Long) {
+        if (!garlicProfileSelector.isActive(token)) return
         val config = wireGuardConfig ?: run {
             engineSwitchInProgress = false
             warpModeButton.isEnabled = true
@@ -1775,11 +1802,20 @@ class MainActivity : Activity() {
             var finalText = ""
             var connected = false
             try {
+                if (!garlicProfileSelector.isActive(token)) return@Thread
                 wireGuardBackend.setState(matrixTunnel, State.UP, config)
+                if (!garlicProfileSelector.isActive(token)) {
+                    wireGuardBackend.setState(matrixTunnel, State.DOWN, null)
+                    return@Thread
+                }
                 var probeStartedAt = SystemClock.elapsedRealtime()
                 var probe = TunnelConnectivityProbe.check()
                 var latency = (SystemClock.elapsedRealtime() - probeStartedAt).coerceAtLeast(1L)
                 if (startingProfileId != null) NodeHealthStore.record(this, startingProfileId, probe.reachable, latency)
+                if (!garlicProfileSelector.isActive(token)) {
+                    wireGuardBackend.setState(matrixTunnel, State.DOWN, null)
+                    return@Thread
+                }
 
                 if (probe.reachable) {
                     connected = true
@@ -1794,6 +1830,10 @@ class MainActivity : Activity() {
                         .sortedByDescending { NodeHealthStore.score(this, it.id) }
                     val attempts = mutableListOf<String>()
                     for (backup in backups) {
+                        if (!garlicProfileSelector.isActive(token)) {
+                            wireGuardBackend.setState(matrixTunnel, State.DOWN, null)
+                            break
+                        }
                         try {
                             val text = SecureProfileVault.load(this, backup.id) ?: continue
                             val backupConfig = Config.parse(ByteArrayInputStream(text.toByteArray(Charsets.UTF_8)))
@@ -1803,6 +1843,11 @@ class MainActivity : Activity() {
                             probe = TunnelConnectivityProbe.check()
                             latency = (SystemClock.elapsedRealtime() - probeStartedAt).coerceAtLeast(1L)
                             NodeHealthStore.record(this, backup.id, probe.reachable, latency)
+                            if (!garlicProfileSelector.isActive(token)) {
+                                wireGuardBackend.setState(matrixTunnel, State.DOWN, null)
+                                connected = false
+                                break
+                            }
                             attempts.add(backup.name)
                             if (probe.reachable) {
                                 activeProfileId = backup.id
@@ -1832,7 +1877,12 @@ class MainActivity : Activity() {
                 finalText = "Ошибка запуска VPN: ${e.message ?: e.javaClass.simpleName}"
                 try { wireGuardBackend.setState(matrixTunnel, State.DOWN, null) } catch (_: Exception) { }
             }
+            if (!garlicProfileSelector.isActive(token)) {
+                try { wireGuardBackend.setState(matrixTunnel, State.DOWN, null) } catch (_: Exception) { }
+                return@Thread
+            }
             runOnUiThread {
+                if (!garlicProfileSelector.isActive(token)) return@runOnUiThread
                 wireGuardStartupInProgress = false
                 engineSwitchInProgress = false
                 warpModeButton.isEnabled = true
@@ -2375,7 +2425,11 @@ class MainActivity : Activity() {
                 pendingRecoveryPreferredIds = emptyList()
                 startCrossEngineRecovery(excludedId, recoveryReason, preferredIds)
             } else if (resultCode == RESULT_OK) {
-                startSelectedVpnTunnel()
+                if (selectedProfileToken != null) startSelectedVpnTunnel(selectedProfileToken)
+                else {
+                    status.text = "Подключение отменено: отсутствует действующий запрос MATRIX."
+                    refreshModeButtons()
+                }
             } else {
                 pendingRecoveryReason = null
                 pendingRecoveryExcludedId = null
