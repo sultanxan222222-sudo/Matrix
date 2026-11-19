@@ -40,7 +40,7 @@ jobs:
 
       - name: Convert official Qwen weights to Garlic Q4i format
         env:
-          MATRIX_QWEN_MODEL: ${{ inputs.model }}
+          MATRIX_QWEN_MODEL: ${{ inputs.model || 'Qwen/Qwen3.5-0.8B' }}
           MATRIX_MODEL_OUTPUT: ${{ github.workspace }}/build/matrix-qwen35-0.8b
           MATRIX_MODEL_WORK: ${{ github.workspace }}/build/qwen35-work
         run: python native/garlic_android/build_qwen35_model_pack.py
