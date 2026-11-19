@@ -62,7 +62,13 @@ class GarlicModelPackInstaller(context: Context) {
             val tokenizerFile = File(stage, "tokenizer.bin")
             val modelIndex = File(stage, "model.idx")
             validateIndex(modelIndex, weightsFile)
-            validateTokenizer(tokenizerFile, readIndexUInt32(modelIndex, 28))
+            val modelVocab = readIndexUInt32(modelIndex, 28)
+            val specialTokenIds = listOf(
+                readIndexUInt32(modelIndex, 36),
+                readIndexUInt32(modelIndex, 40),
+                readIndexUInt32(modelIndex, 216)
+            )
+            validateTokenizer(tokenizerFile, modelVocab, specialTokenIds)
 
             var oldMoved = false
             if (target.exists()) {
@@ -247,7 +253,7 @@ class GarlicModelPackInstaller(context: Context) {
             ((bytes[3].toLong() and 255L) shl 24)
     }
 
-    private fun validateTokenizer(file: File, expectedVocabulary: Long) {
+    private fun validateTokenizer(file: File, expectedVocabulary: Long, specialTokenIds: List<Long>) {
         require(file.isFile && file.length() in 1036L..(64L * 1024 * 1024)) {
             "tokenizer.bin отсутствует или имеет недопустимый размер."
         }
@@ -275,6 +281,10 @@ class GarlicModelPackInstaller(context: Context) {
             require(u32At(bytes, 12 + byte * 4) < vocabulary) {
                 "Таблица байтов токенизатора ссылается на неизвестный токен."
             }
+        }
+
+        require(specialTokenIds.all { it in 0 until vocabulary }) {
+            "Специальный токен модели не найден в таблице Garlic tokenizer."
         }
 
         var cursor = 12 + 256 * 4
