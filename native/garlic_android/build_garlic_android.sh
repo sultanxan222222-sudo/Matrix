@@ -71,17 +71,8 @@ fi
   "$ROOT/app/src/main/cpp/garlic/shaders/qwen35.cl" \
   -o "$ROOT/app/src/main/assets/garlic/qwen35.spv"
 
-# clvk's Android runtime consumes precompiled SPIR-V through clCreateProgramWithIL.
-# Disable its runtime OpenCL-C compiler; keep SPIR-V IL support and the Vulkan backend.
-LLVM_SOURCE="$CLSPV_DIR/third_party/llvm/llvm"
-CLANG_SOURCE="$CLSPV_DIR/third_party/llvm/clang"
-LLVM_BINARY="$HOST_CLSPV_BUILD/third_party/llvm"
-LIBCLC_32="$(find "$LLVM_BINARY/lib/clang" -type f -path '*/spirv32-unknown-vulkan/libclc.bc' -print -quit)"
-if [[ -z "$LIBCLC_32" ]]; then
-  echo "The host clspv build did not produce SPIR-V libclc." >&2
-  exit 4
-fi
-LIBCLC_DIR="$(dirname "$(dirname "$LIBCLC_32")")"
+# clvk consumes the precompiled SPIR-V generated above. Since its Android compiler is
+# disabled, it needs no LLVM/Clang, libclc or SPIRV-LLVM-Translator runtime linkage.
 
 HOST_TAG="linux-x86_64"
 SYSROOT="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/$HOST_TAG/sysroot"
@@ -105,11 +96,6 @@ cmake -S "$CLVK_DIR" -B "$ANDROID_BUILD" \
   -DSPIRV_HEADERS_SOURCE_DIR="$CLVK_DIR/external/SPIRV-Headers" \
   -DSPIRV_TOOLS_SOURCE_DIR="$CLVK_DIR/external/SPIRV-Tools" \
   -DCLSPV_SOURCE_DIR="$CLSPV_DIR" \
-  -DEXTERNAL_LLVM=1 \
-  -DCLSPV_LLVM_SOURCE_DIR="$LLVM_SOURCE" \
-  -DCLSPV_CLANG_SOURCE_DIR="$CLANG_SOURCE" \
-  -DCLSPV_LLVM_BINARY_DIR="$LLVM_BINARY" \
-  -DCLSPV_EXTERNAL_LIBCLC_DIR="$LIBCLC_DIR" \
   -DCLVK_COMPILER_AVAILABLE=OFF \
   -DCLVK_ENABLE_SPIRV_IL=ON \
   -DCLVK_BUILD_SPIRV_TOOLS=ON \
