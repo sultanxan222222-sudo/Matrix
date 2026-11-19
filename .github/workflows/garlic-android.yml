@@ -54,8 +54,10 @@ jobs:
         shell: bash
         env:
           GARLIC_BUILD_JOBS: "2"
-          ANDROID_NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/27.2.12479018
-        run: bash native/garlic_android/build_garlic_android.sh
+        run: |
+          export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/27.2.12479018"
+          test -f "$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake"
+          bash native/garlic_android/build_garlic_android.sh
 
       - name: Build MATRIX APK and run tests
         run: |
