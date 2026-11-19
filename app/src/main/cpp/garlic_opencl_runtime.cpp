@@ -167,7 +167,7 @@ struct MatrixClRuntime {
     uint64_t globalMemory = 0;
     uint64_t maxAllocation = 0;
     std::unordered_map<std::string, cl_kernel> kernels;
-    std::unordered_map<uint64_t, cl_mem> subbuffers;
+    std::unordered_map<std::string, cl_mem> subbuffers;
     std::vector<cl_mem> rootBuffers;
 
     ~MatrixClRuntime() {
@@ -301,7 +301,7 @@ extern "C" MatrixClBuffer matrix_cl_subbuffer(MatrixClRuntime* runtime, MatrixCl
         writeError(error, error_capacity, "Garlic buffer offset is not aligned for this Vulkan device.");
         return nullptr;
     }
-    const uint64_t key = (static_cast<uint64_t>(origin) << 32) ^ static_cast<uint64_t>(size);
+    const std::string key = std::to_string(origin) + ":" + std::to_string(size);
     auto found = runtime->subbuffers.find(key);
     if (found != runtime->subbuffers.end()) return found->second;
 
@@ -354,8 +354,9 @@ extern "C" int matrix_cl_set_mem_arg(MatrixClRuntime* runtime, MatrixClKernel ke
                                       uint32_t index, MatrixClBuffer buffer) {
     if (!runtime || !kernel) return -1;
     cl_mem handle = static_cast<cl_mem>(buffer);
+    // OpenCL expects arg_value to point to a cl_mem handle even when the handle is NULL.
     return runtime->api->setKernelArg(static_cast<cl_kernel>(kernel), index,
-                                      sizeof(handle), buffer ? &handle : nullptr);
+                                      sizeof(handle), &handle);
 }
 
 extern "C" int matrix_cl_set_arg(MatrixClRuntime* runtime, MatrixClKernel kernel,
