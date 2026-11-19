@@ -959,23 +959,12 @@ class MainActivity : Activity() {
 
     private fun connectOrDisconnect() {
         if (tunnelUp) {
-            connectButton.isEnabled = false
-            Thread {
-                try {
-                    wireGuardBackend.setState(matrixTunnel, State.DOWN, null)
-                    runOnUiThread {
-                        status.text = "VPN-туннель: отключён"
-                        connectButton.isEnabled = true
-                    }
-                } catch (e: Exception) {
-                    runOnUiThread {
-                        connectButton.isEnabled = true
-                        showError("Не удалось отключить VPN", e.message ?: "Не удалось остановить туннель.")
-                    }
-                }
-            }.start()
+            emergencyStopVpn()
             return
         }
+        // A manual connection always ends the previous automatic selection session.
+        pendingAutoConnect = false
+        autopilotLatch.emergencyStop()
         if (wireGuardConfig == null) {
             showError("Нет профиля VPN", "Сначала импортируйте и проверьте файл WireGuard или AmneziaWG .conf.")
             return
@@ -992,6 +981,9 @@ class MainActivity : Activity() {
         Thread {
             try {
                 wireGuardBackend.setState(matrixTunnel, State.UP, config)
+                activeConfig = config
+                activeCandidateId = null
+                tunnelUp = true
                 val probe = TunnelConnectivityProbe.check()
                 runOnUiThread {
                     requestGarlicNetworkAssessment(probe)
@@ -1027,8 +1019,22 @@ class MainActivity : Activity() {
             return
         }
         if (requestCode == vpnPermissionRequest) {
-            if (resultCode == RESULT_OK) startWireGuardTunnel()
-            else showError("Разрешение VPN не предоставлено", "Android не разрешил приложению MATRIX создать VPN-туннель.")
+            if (resultCode == RESULT_OK) {
+                if (pendingAutoConnect) {
+                    pendingAutoConnect = false
+                    val token = autoConnectToken
+                    if (autopilotLatch.isActive(token)) {
+                        requestAutomaticCandidateSelection(emptySet(), null, token)
+                    }
+                } else {
+                    startWireGuardTunnel()
+                }
+            } else {
+                pendingAutoConnect = false
+                autopilotLatch.emergencyStop()
+                autoVpnButton.isEnabled = true
+                showError("Разрешение VPN не предоставлено", "Android не разрешил приложению MATRIX создать VPN-туннель.")
+            }
             return
         }
         if (requestCode != pickProfileRequest || resultCode != RESULT_OK) return
@@ -1062,6 +1068,11 @@ class MainActivity : Activity() {
                 }
             }
             connectButton.isEnabled = wireGuardConfig != null
+            if (wireGuardConfig != null) {
+                val manualId = "import-${UUID.randomUUID().toString().take(8)}"
+                vpnCandidates[manualId] = VpnCandidate(manualId, "Импортированный профиль", wireGuardConfig!!)
+                aiStatus.text = "MATRIX AI: добавлен новый разрешённый VPN-кандидат"
+            }
             val endpointText = if (profile.endpointHints.isEmpty()) "Адрес сервера не найден" else profile.endpointHints.joinToString("\n")
             val details = buildString {
                 append("Определённый формат: ").append(formatLabel).append("\n")
