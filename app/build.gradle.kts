@@ -5,6 +5,11 @@ plugins {
 android {
     namespace = "org.matrixvpn"
     compileSdk = 36
+    androidResources {
+        // The bundled quantized model is already compressed; avoid wasting CPU
+        // recompressing 425 MiB during APK build and first-launch asset reads.
+        noCompress += listOf("bin")
+    }
     ndkVersion = "27.2.12479018"
     defaultConfig {
         applicationId = "org.matrixvpn"
