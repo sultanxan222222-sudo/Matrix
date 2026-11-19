@@ -37,6 +37,7 @@ import java.io.ByteArrayInputStream
 import java.util.UUID
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicLong
 
 class MainActivity : Activity() {
     private lateinit var status: TextView
@@ -49,6 +50,7 @@ class MainActivity : Activity() {
     private data class VpnCandidate(val id: String, val label: String, val config: Config)
     private val vpnCandidates = linkedMapOf<String, VpnCandidate>()
     private val autopilotLatch = AutopilotSafetyLatch()
+    private val manualConnectGeneration = AtomicLong(0L)
     private val vpnExecutor: ExecutorService = Executors.newSingleThreadExecutor { task ->
         Thread(task, "matrix-vpn-autopilot").apply { isDaemon = true }
     }
@@ -322,6 +324,7 @@ class MainActivity : Activity() {
             )
             return
         }
+        manualConnectGeneration.incrementAndGet()
         val token = autopilotLatch.enable()
         autoConnectToken = token
         autoVpnButton.isEnabled = false
@@ -550,6 +553,7 @@ class MainActivity : Activity() {
      * then serially stops the tunnel after any in-flight backend call completes.
      */
     private fun emergencyStopVpn() {
+        manualConnectGeneration.incrementAndGet()
         pendingAutoConnect = false
         // Keep pendingAutoPermissionPrompt until Android returns from its consent dialog.
         autoConnectToken = autopilotLatch.emergencyStop()
@@ -990,15 +994,29 @@ class MainActivity : Activity() {
 
     private fun startWireGuardTunnel() {
         val config = wireGuardConfig ?: return
+        val generation = manualConnectGeneration.incrementAndGet()
         status.text = "Запуск VPN-туннеля…"
         connectButton.isEnabled = false
-        Thread {
+        vpnExecutor.execute {
             try {
+                if (manualConnectGeneration.get() != generation) return@execute
                 wireGuardBackend.setState(matrixTunnel, State.UP, config)
                 activeConfig = config
                 activeCandidateId = null
                 tunnelUp = true
+                if (manualConnectGeneration.get() != generation) {
+                    wireGuardBackend.setState(matrixTunnel, State.DOWN, null)
+                    tunnelUp = false
+                    activeConfig = null
+                    return@execute
+                }
                 val probe = TunnelConnectivityProbe.check()
+                if (manualConnectGeneration.get() != generation) {
+                    wireGuardBackend.setState(matrixTunnel, State.DOWN, null)
+                    tunnelUp = false
+                    activeConfig = null
+                    return@execute
+                }
                 runOnUiThread {
                     requestGarlicNetworkAssessment(probe)
                     status.text = if (probe.reachable) {
@@ -1012,10 +1030,12 @@ class MainActivity : Activity() {
             } catch (e: Exception) {
                 runOnUiThread {
                     connectButton.isEnabled = true
-                    showError("Ошибка подключения", e.message ?: "Не удалось запустить WireGuard. Проверьте профиль и разрешение Android на VPN.")
+                    if (manualConnectGeneration.get() == generation) {
+                        showError("Ошибка подключения", e.message ?: "Не удалось запустить WireGuard. Проверьте профиль и разрешение Android на VPN.")
+                    }
                 }
             }
-        }.start()
+        }
     }
 
     private fun showError(title: String, message: String) {
