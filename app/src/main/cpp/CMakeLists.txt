@@ -3,6 +3,7 @@ project(matrix_garlic_android LANGUAGES C CXX)
 
 add_library(matrix_garlic SHARED
     garlic_opencl_probe.cpp
+    garlic_opencl_runtime.cpp
 )
 
 target_compile_features(matrix_garlic PRIVATE cxx_std_17)
