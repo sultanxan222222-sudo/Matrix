@@ -49,12 +49,26 @@
 #define HALFV ATTN_NAME(halfv_t)
 #define CHARV ATTN_NAME(charv_t)
 #if EPT == 1
-typedef _Float16 HALFV;
+typedef half HALFV;
 typedef char CHARV;
 #undef VEL
 #define VEL(v, d) (v)
 #else
-typedef _Float16 HALFV __attribute__((ext_vector_type(EPT)));
+#if EPT == 2
+typedef half2 HALFV;
+typedef char2 CHARV;
+#elif EPT == 4
+typedef half4 HALFV;
+typedef char4 CHARV;
+#elif EPT == 8
+typedef half8 HALFV;
+typedef char8 CHARV;
+#elif EPT == 16
+typedef half16 HALFV;
+typedef char16 CHARV;
+#else
+#error Unsupported Android OpenCL attention vector width
+#endif
 typedef char CHARV __attribute__((ext_vector_type(EPT)));
 #undef VEL
 #define VEL(v, d) ((v)[d])
