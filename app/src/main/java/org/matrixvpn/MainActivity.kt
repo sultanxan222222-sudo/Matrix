@@ -112,6 +112,7 @@ class MainActivity : Activity() {
     private var pendingRecoveryReason: String? = null
     private var pendingRecoveryExcludedId: String? = null
     private var pendingRecoveryPreferredIds: List<String> = emptyList()
+    @Volatile private var pendingRecoveryGarlicToken: Long? = null
     @Volatile private var pendingGarlicPermissionToken: Long? = null
     private var openVpnRunning = false
     private var openVpnState: String = MatrixVpnService.STATE_DISCONNECTED
@@ -1981,6 +1982,7 @@ class MainActivity : Activity() {
             pendingRecoveryReason = reason
             pendingRecoveryExcludedId = excludedProfileId
             pendingRecoveryPreferredIds = preferredProfileIds
+            pendingRecoveryGarlicToken = garlicRunToken
             startActivityForResult(vpnConsent, vpnPermissionRequest)
             return
         }
@@ -2348,6 +2350,8 @@ class MainActivity : Activity() {
         }
         if (requestCode == vpnPermissionRequest) {
             val recoveryReason = pendingRecoveryReason
+            val recoveryToken = pendingRecoveryGarlicToken
+            pendingRecoveryGarlicToken = null
             val selectedProfileToken = pendingGarlicPermissionToken
             pendingGarlicPermissionToken = null
             if (selectedProfileToken != null && !garlicProfileSelector.isActive(selectedProfileToken)) {
@@ -2357,10 +2361,12 @@ class MainActivity : Activity() {
                 refreshModeButtons()
                 return
             }
-            if (recoveryReason != null && !garlicProfileSelector.isActive(garlicRunToken)) {
+            if (recoveryReason != null &&
+                (recoveryToken == null || !garlicProfileSelector.isActive(recoveryToken))) {
                 pendingRecoveryReason = null
                 pendingRecoveryExcludedId = null
                 pendingRecoveryPreferredIds = emptyList()
+                status.text = "Автоматическое переключение отменено аварийной остановкой."
                 return
             }
             if (resultCode == RESULT_OK && recoveryReason != null) {
@@ -2376,6 +2382,7 @@ class MainActivity : Activity() {
                 pendingRecoveryReason = null
                 pendingRecoveryExcludedId = null
                 pendingRecoveryPreferredIds = emptyList()
+                pendingRecoveryGarlicToken = null
                 showError("Разрешение VPN не предоставлено", "Android не разрешил приложению MATRIX создать VPN-туннель.")
                 scheduleQualityMonitor(QUALITY_FIRST_PROBE_DELAY_MS)
             }
