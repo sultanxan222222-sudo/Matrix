@@ -155,7 +155,7 @@ typedef struct {
     uint8_t* row_cache;     // direct-mapped cache of embedding rows
     int32_t* row_tag;
     uint64_t staging;       // one dequantized row per step of a submission (GPU memory)
-    char weights_path[129];
+    char weights_path[512];
     uint64_t weights_size;
     Tensor* t;
     uint32_t n_tensors;
