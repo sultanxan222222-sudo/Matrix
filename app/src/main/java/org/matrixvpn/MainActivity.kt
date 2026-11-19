@@ -54,6 +54,10 @@ class MainActivity : Activity() {
     private data class CandidateHealth(
         val reachable: Boolean,
         val latencyMillis: Long?,
+        val jitterMillis: Long?,
+        val failurePercent: Int,
+        val sampleCount: Int,
+        val successfulSamples: Int,
         val httpCode: Int?,
         val checkedAtMillis: Long
     )
@@ -434,7 +438,11 @@ class MainActivity : Activity() {
                     JSONObject()
                         .put("profile_id", candidate.id)
                         .put("reachable", health.reachable)
-                        .put("rtt_ms", health.latencyMillis ?: JSONObject.NULL)
+                        .put("https_median_ms", health.latencyMillis ?: JSONObject.NULL)
+                        .put("https_variation_ms", health.jitterMillis ?: JSONObject.NULL)
+                        .put("probe_failure_percent", health.failurePercent)
+                        .put("sample_count", health.sampleCount)
+                        .put("successful_samples", health.successfulSamples)
                         .put("http_status", health.httpCode ?: JSONObject.NULL)
                         .put("age_seconds", ((now - health.checkedAtMillis).coerceAtLeast(0L) / 1000L))
                 )
@@ -457,7 +465,11 @@ class MainActivity : Activity() {
             .put("current_profile_id", activeCandidateId ?: JSONObject.NULL)
             .put("connectivity_known", lastProbe != null)
             .put("external_https_reachable", lastProbe?.reachable ?: false)
-            .put("external_https_rtt_ms", lastProbe?.latencyMillis ?: JSONObject.NULL)
+            .put("external_https_median_ms", lastProbe?.latencyMillis ?: JSONObject.NULL)
+            .put("external_https_variation_ms", lastProbe?.jitterMillis ?: JSONObject.NULL)
+            .put("external_probe_failure_percent", lastProbe?.probeFailurePercent ?: JSONObject.NULL)
+            .put("external_probe_samples", lastProbe?.sampleCount ?: JSONObject.NULL)
+            .put("external_probe_successes", lastProbe?.successfulSamples ?: JSONObject.NULL)
             .put("external_http_status", lastProbe?.httpCode ?: JSONObject.NULL)
             .put("candidate_count", remaining.size)
             .put("candidate_profile_ids", candidateJson)
@@ -558,6 +570,10 @@ class MainActivity : Activity() {
                     candidateHealth[candidate.id] = CandidateHealth(
                         reachable = probe.reachable,
                         latencyMillis = probe.latencyMillis,
+                        jitterMillis = probe.jitterMillis,
+                        failurePercent = probe.probeFailurePercent,
+                        sampleCount = probe.sampleCount,
+                        successfulSamples = probe.successfulSamples,
                         httpCode = probe.httpCode,
                         checkedAtMillis = System.currentTimeMillis()
                     )
@@ -678,6 +694,10 @@ class MainActivity : Activity() {
                         candidateHealth[currentId] = CandidateHealth(
                             reachable = probe.reachable,
                             latencyMillis = probe.latencyMillis,
+                        jitterMillis = probe.jitterMillis,
+                        failurePercent = probe.probeFailurePercent,
+                        sampleCount = probe.sampleCount,
+                        successfulSamples = probe.successfulSamples,
                             httpCode = probe.httpCode,
                             checkedAtMillis = System.currentTimeMillis()
                         )
@@ -1190,6 +1210,10 @@ class MainActivity : Activity() {
                         candidateHealth[id] = CandidateHealth(
                             reachable = probe.reachable,
                             latencyMillis = probe.latencyMillis,
+                        jitterMillis = probe.jitterMillis,
+                        failurePercent = probe.probeFailurePercent,
+                        sampleCount = probe.sampleCount,
+                        successfulSamples = probe.successfulSamples,
                             httpCode = probe.httpCode,
                             checkedAtMillis = System.currentTimeMillis()
                         )
