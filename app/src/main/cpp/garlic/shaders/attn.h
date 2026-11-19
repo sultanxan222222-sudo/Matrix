@@ -69,7 +69,7 @@ typedef char16 CHARV;
 #else
 #error Unsupported Android OpenCL attention vector width
 #endif
-typedef char CHARV __attribute__((ext_vector_type(EPT)));
+/* Android: CHARV is one of the standard OpenCL charN vector types above. */
 #undef VEL
 #define VEL(v, d) ((v)[d])
 #endif
