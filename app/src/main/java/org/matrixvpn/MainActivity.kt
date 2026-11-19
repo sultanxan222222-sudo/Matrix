@@ -695,23 +695,40 @@ class MainActivity : Activity() {
         }
         Thread {
             var connection: java.net.HttpURLConnection? = null
+            var usedEndpointLab = false
             try {
-                val url = java.net.URL("https://awgconfig.com/api/warp?mode=legacy&count=3&dns=cloudflare")
-                connection = (url.openConnection() as java.net.HttpURLConnection).apply {
-                    requestMethod = "GET"
-                    connectTimeout = 15000
-                    readTimeout = 25000
-                    setRequestProperty("Accept", "application/json")
-                    setRequestProperty("User-Agent", "MATRIX-VPN-Android/0.6.0")
-                    instanceFollowRedirects = true
+                var json: JSONObject? = null
+                var lastServiceError = "Сервис WARP не ответил."
+                // Prefer distinct, recently checked endpoints. If Lab has no fresh pool,
+                // explicitly retry the generator's documented hostname mode.
+                for (endpointMode in listOf("lab", "hostname")) {
+                    connection?.disconnect()
+                    val url = java.net.URL(
+                        "https://awgconfig.com/api/warp?mode=legacy&count=3&dns=cloudflare&endpointMode=$endpointMode"
+                    )
+                    connection = (url.openConnection() as java.net.HttpURLConnection).apply {
+                        requestMethod = "GET"
+                        connectTimeout = 15000
+                        readTimeout = 25000
+                        setRequestProperty("Accept", "application/json")
+                        setRequestProperty("User-Agent", "MATRIX-VPN-Android/0.7.0")
+                        instanceFollowRedirects = true
+                    }
+                    val code = connection.responseCode
+                    val stream = if (code in 200..299) connection.inputStream else connection.errorStream
+                    val response = stream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
+                    require(response.length <= 1_000_000) { "Ответ сервиса слишком большой." }
+                    if (code in 200..299) {
+                        json = JSONObject(response)
+                        usedEndpointLab = endpointMode == "lab"
+                        break
+                    }
+                    lastServiceError = "Сервис WARP ответил с кодом HTTP $code."
+                    if (endpointMode != "lab" || code != 503) {
+                        throw IllegalStateException(lastServiceError)
+                    }
                 }
-                val code = connection.responseCode
-                val stream = if (code in 200..299) connection.inputStream else connection.errorStream
-                val response = stream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }
-                    ?: throw IllegalStateException("Сервис не вернул ответ (HTTP $code).")
-                require(response.length <= 1_000_000) { "Ответ сервиса слишком большой." }
-                if (code !in 200..299) throw IllegalStateException("Сервис WARP ответил с кодом HTTP $code.")
-                val json = JSONObject(response)
+                val json = json ?: throw IllegalStateException(lastServiceError)
                 if (!json.optBoolean("success", true)) {
                     throw IllegalStateException(json.optString("error").ifBlank { "Сервис не смог создать профили WARP." })
                 }
@@ -758,7 +775,7 @@ class MainActivity : Activity() {
                     wireGuardConfig = parsed.first().config
                     connectButton.isEnabled = true
                     autoVpnButton.isEnabled = true
-                    status.text = "MATRIX получил и проверил профили: ${parsed.size}\nИсточник: awgconfig.com / Cloudflare WARP"
+                    status.text = "MATRIX получил и проверил профили: ${parsed.size}\nИсточник: awgconfig.com / Cloudflare WARP • ${if (usedEndpointLab) "разные проверенные endpoint" else "hostname endpoint"}"
                     aiStatus.text = "MATRIX AI: доступно кандидатов VPN — ${parsed.size}"
                     if (autoStart) requestAutoVpnPermission(token)
                 }
