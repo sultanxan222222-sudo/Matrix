@@ -586,7 +586,10 @@ int engine_init(Engine* e, const char* dir, ProgressFn progress, void* user) {
             fail(e, "Tensor %u points outside the Garlic weights file.", i);
             return -1;
         }
-        if ((e->cpu_embed && i == 0) || tensor->fmt == 7) continue;
+        // A Q4row embedding is fetched row-by-row for token input, but tied Qwen output
+        // projection still performs a full matvec against the same embedding matrix.
+        // Keep its GPU mirror registered for the final logits kernel.
+        if (tensor->fmt == 7) continue;
         if (tensor->size > matrix_cl_max_allocation(modelRuntime)) {
             fail(e, "Tensor %u (%llu bytes) exceeds this GPU's maximum single allocation.",
                  i, (unsigned long long)tensor->size);
