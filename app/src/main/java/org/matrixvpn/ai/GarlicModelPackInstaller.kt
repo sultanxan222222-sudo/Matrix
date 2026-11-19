@@ -208,13 +208,20 @@ class GarlicModelPackInstaller(context: Context) {
             val rows = u32(pos + 16)
             val columns = u32(pos + 20)
             val scalesOffset = u64(pos + 24)
+            val format = u32(pos + 32)
             require(offset >= 0L && size > 0L && offset % 256L == 0L &&
                 offset <= expectedWeightBytes && size <= expectedWeightBytes - offset) {
                 "Тензор $index выходит за границы файла весов."
             }
-            require(rows in 1..1_000_000 && columns in 1..65536 &&
-                scalesOffset >= 0L && scalesOffset <= size) {
-                "У тензора $index повреждены размерности или смещение шкал."
+            // Garlic F32 state/normalization records legitimately have rows=cols=0.
+            // Quantized matrix records must have valid dimensions for their Q4/Q3 kernels.
+            if (format == 3L || format == 4L || format == 5L || format == 6L || format == 8L) {
+                require(rows in 1..1_000_000 && columns in 32..65536 && columns % 32L == 0L) {
+                    "У квантованного тензора $index повреждены размерности."
+                }
+            }
+            require(scalesOffset >= 0L && scalesOffset <= size) {
+                "У тензора $index повреждено смещение шкал."
             }
             ranges += offset to (offset + size)
         }
