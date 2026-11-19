@@ -355,20 +355,27 @@ class MainActivity : Activity() {
         bottomMargin = (6 * resources.displayMetrics.density).toInt()
     }
 
-    /** Fetches a fresh free Cloudflare WARP-compatible WireGuard profile from the public generator API. */
+    /** Fetches up to three independently registered WARP candidate profiles. */
     private fun fetchFreeWarpProfile() {
-        status.text = "Получение бесплатного профиля WARP…"
-        connectButton.isEnabled = false
+        fetchWarpCandidates(autoStart = false, token = 0L)
+    }
+
+    private fun fetchWarpCandidates(autoStart: Boolean, token: Long) {
+        runOnUiThread {
+            status.text = if (autoStart) "MATRIX AI: поиск вариантов VPN…" else "Получение вариантов Cloudflare WARP…"
+            connectButton.isEnabled = false
+            autoVpnButton.isEnabled = false
+        }
         Thread {
             var connection: java.net.HttpURLConnection? = null
             try {
-                val url = java.net.URL("https://awgconfig.com/api/warp?mode=legacy&count=1&dns=cloudflare")
+                val url = java.net.URL("https://awgconfig.com/api/warp?mode=legacy&count=3&dns=cloudflare")
                 connection = (url.openConnection() as java.net.HttpURLConnection).apply {
                     requestMethod = "GET"
                     connectTimeout = 15000
-                    readTimeout = 20000
+                    readTimeout = 25000
                     setRequestProperty("Accept", "application/json")
-                    setRequestProperty("User-Agent", "MATRIX-VPN-Android/0.4.0")
+                    setRequestProperty("User-Agent", "MATRIX-VPN-Android/0.6.0")
                     instanceFollowRedirects = true
                 }
                 val code = connection.responseCode
@@ -377,45 +384,89 @@ class MainActivity : Activity() {
                     ?: throw IllegalStateException("Сервис не вернул ответ (HTTP $code).")
                 require(response.length <= 1_000_000) { "Ответ сервиса слишком большой." }
                 if (code !in 200..299) throw IllegalStateException("Сервис WARP ответил с кодом HTTP $code.")
-                val json = org.json.JSONObject(response)
-                if (json.optBoolean("success", true).not()) {
-                    throw IllegalStateException(json.optString("error").ifBlank { "Сервис не смог создать профиль WARP." })
+                val json = JSONObject(response)
+                if (!json.optBoolean("success", true)) {
+                    throw IllegalStateException(json.optString("error").ifBlank { "Сервис не смог создать профили WARP." })
                 }
-                var encoded = json.optString("content")
-                if (encoded.isBlank()) {
-                    val configs = json.optJSONArray("configs")
-                    if (configs != null && configs.length() > 0) encoded = configs.getJSONObject(0).optString("content")
-                }
-                require(encoded.isNotBlank()) { "Сервис не вернул файл конфигурации." }
-                val profileText = try {
-                    String(android.util.Base64.decode(encoded, android.util.Base64.DEFAULT), Charsets.UTF_8)
-                } catch (_: IllegalArgumentException) {
-                    encoded
-                }
-                require(profileText.contains("[Interface]", ignoreCase = true) &&
-                    profileText.contains("[Peer]", ignoreCase = true)) {
-                    "Сервис вернул данные в неизвестном формате."
-                }
-                runOnUiThread {
-                    processProfileText(profileText)
-                    if (wireGuardConfig != null) {
-                        status.text = "Бесплатный профиль WARP готов\nVPN-туннель: отключён\nНажмите «Подключить VPN»."
+
+                val encodedProfiles = mutableListOf<String>()
+                val configs = json.optJSONArray("configs")
+                if (configs != null) {
+                    for (index in 0 until minOf(configs.length(), 3)) {
+                        val item = configs.optJSONObject(index) ?: continue
+                        val encoded = item.optString("content")
+                        if (encoded.isNotBlank()) encodedProfiles += encoded
                     }
+                }
+                if (encodedProfiles.isEmpty()) {
+                    val encoded = json.optString("content")
+                    if (encoded.isNotBlank()) encodedProfiles += encoded
+                }
+                require(encodedProfiles.isNotEmpty()) { "Сервис не вернул ни одного VPN-профиля." }
+
+                val parsed = mutableListOf<VpnCandidate>()
+                encodedProfiles.take(3).forEachIndexed { index, encoded ->
+                    val profileText = decodeGeneratedProfile(encoded)
+                    val summary = VpnProfileInspector.inspect(profileText)
+                    require(summary.format == ImportedVpnProfile.Format.WIREGUARD ||
+                        summary.format == ImportedVpnProfile.Format.AMNEZIAWG) {
+                        "Профиль №${index + 1} не совместим со встроенным движком WireGuard/AmneziaWG."
+                    }
+                    val config = Config.parse(ByteArrayInputStream(profileText.toByteArray(Charsets.UTF_8)))
+                    val endpoint = summary.endpointHints.firstOrNull()?.take(96) ?: "endpoint скрыт"
+                    val id = "warp-${index + 1}-${UUID.randomUUID().toString().take(8)}"
+                    parsed += VpnCandidate(id, "Cloudflare WARP ${index + 1} • $endpoint", config)
+                }
+                require(parsed.isNotEmpty()) { "Все полученные профили были отклонены проверкой MATRIX." }
+
+                runOnUiThread {
+                    if (isFinishing || isDestroyed) return@runOnUiThread
+                    if (autoStart && !autopilotLatch.isActive(token)) {
+                        autoVpnButton.isEnabled = true
+                        status.text = "Автоподбор отменён пользователем."
+                        return@runOnUiThread
+                    }
+                    vpnCandidates.clear()
+                    parsed.forEach { vpnCandidates[it.id] = it }
+                    wireGuardConfig = parsed.first().config
+                    connectButton.isEnabled = true
+                    autoVpnButton.isEnabled = true
+                    status.text = "MATRIX получил и проверил профили: ${parsed.size}\nИсточник: awgconfig.com / Cloudflare WARP"
+                    aiStatus.text = "MATRIX AI: доступно кандидатов VPN — ${parsed.size}"
+                    if (autoStart) requestAutoVpnPermission(token)
                 }
             } catch (e: Exception) {
                 runOnUiThread {
+                    if (isFinishing || isDestroyed) return@runOnUiThread
+                    autoVpnButton.isEnabled = true
                     connectButton.isEnabled = wireGuardConfig != null
-                    status.text = "Не удалось получить профиль WARP"
+                    status.text = "Не удалось получить варианты VPN"
                     showError(
-                        "Автоматическая настройка не удалась",
+                        "Автоматический поиск не завершён",
                         (e.message ?: "Сервис WARP сейчас недоступен.") +
-                            "\n\nПроверьте интернет и попробуйте ещё раз. Генератор — сторонний бесплатный сервис, его доступность не гарантируется."
+                            "\n\nГенератор сторонний и может временно не отвечать. MATRIX не подключает непроверенные профили."
                     )
+                    if (autoStart) autopilotLatch.emergencyStop()
                 }
             } finally {
                 connection?.disconnect()
             }
         }.start()
+    }
+
+    private fun decodeGeneratedProfile(encoded: String): String {
+        val decoded = try {
+            String(android.util.Base64.decode(encoded, android.util.Base64.DEFAULT), Charsets.UTF_8)
+        } catch (_: IllegalArgumentException) {
+            encoded
+        }
+        val profileText = if (decoded.contains("[Interface]", ignoreCase = true)) decoded else encoded
+        require(profileText.contains("[Interface]", ignoreCase = true) &&
+            profileText.contains("[Peer]", ignoreCase = true)) {
+            "Сервис вернул данные не в формате WireGuard/AmneziaWG."
+        }
+        require(profileText.length <= 2_000_000) { "VPN-профиль слишком большой." }
+        return profileText
     }
 
 
