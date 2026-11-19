@@ -870,6 +870,7 @@ class MainActivity : Activity() {
                 require(encodedProfiles.isNotEmpty()) { "Сервис не вернул ни одного VPN-профиля." }
 
                 val parsed = mutableListOf<VpnCandidate>()
+                val seenEndpoints = mutableSetOf<String>()
                 encodedProfiles.take(3).forEachIndexed { index, encoded ->
                     val profileText = decodeGeneratedProfile(encoded)
                     val summary = VpnProfileInspector.inspect(profileText)
@@ -877,12 +878,24 @@ class MainActivity : Activity() {
                         summary.format == ImportedVpnProfile.Format.AMNEZIAWG) {
                         "Профиль №${index + 1} не совместим со встроенным движком WireGuard/AmneziaWG."
                     }
+                    val endpointRaw = summary.endpointHints.firstOrNull()
+                    require(!endpointRaw.isNullOrBlank()) {
+                        "У профиля №${index + 1} не найден адрес VPN endpoint."
+                    }
+                    val endpointKey = endpointRaw.trim().lowercase()
+                    // The generator's hostname fallback creates separate WARP registrations
+                    // but routes them to the same endpoint. Do not pretend those are
+                    // independent failover servers; keep only genuinely distinct endpoints.
+                    if (!seenEndpoints.add(endpointKey)) return@forEachIndexed
+
                     val config = Config.parse(ByteArrayInputStream(profileText.toByteArray(Charsets.UTF_8)))
-                    val endpoint = summary.endpointHints.firstOrNull()?.take(96) ?: "endpoint скрыт"
+                    val endpoint = endpointRaw.take(96)
                     val id = "warp-${index + 1}-${UUID.randomUUID().toString().take(8)}"
-                    parsed += VpnCandidate(id, "Cloudflare WARP ${index + 1} • $endpoint", config)
+                    parsed += VpnCandidate(id, "Cloudflare WARP ${parsed.size + 1} • $endpoint", config)
                 }
-                require(parsed.isNotEmpty()) { "Все полученные профили были отклонены проверкой MATRIX." }
+                require(parsed.isNotEmpty()) {
+                    "Не найдено ни одного нового уникального endpoint. Повторная регистрация WARP на одном hostname не считается новым VPN-маршрутом."
+                }
 
                 runOnUiThread {
                     if (isFinishing || isDestroyed) return@runOnUiThread
@@ -899,7 +912,7 @@ class MainActivity : Activity() {
                     if (wireGuardConfig == null) wireGuardConfig = parsed.first().config
                     connectButton.isEnabled = true
                     autoVpnButton.isEnabled = true
-                    status.text = "MATRIX получил и проверил профили: ${parsed.size}\nИсточник: awgconfig.com / Cloudflare WARP • ${if (usedEndpointLab) "разные проверенные endpoint" else "hostname endpoint"}"
+                    status.text = "MATRIX получил и проверил уникальные маршруты: ${parsed.size}\nИсточник: awgconfig.com / Cloudflare WARP • ${if (usedEndpointLab) "разные проверенные endpoint" else "один hostname endpoint"}"
                     aiStatus.text = "MATRIX AI: доступно кандидатов VPN — ${parsed.size}"
                     if (autoStart) requestAutoVpnPermission(token)
                 }
