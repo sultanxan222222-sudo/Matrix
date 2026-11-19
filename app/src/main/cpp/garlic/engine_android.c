@@ -373,6 +373,10 @@ int engine_init(Engine* e, const char* dir, ProgressFn progress, void* user) {
     e->kargs_cap = KARGS_BYTES;
     e->label = (volatile uint32_t*)(uintptr_t)cpu_alloc(e, 256);
     e->stamps = (volatile uint64_t*)(uintptr_t)cpu_alloc(e, 256);
+    if (!e->dcb || !e->kargs || !e->label || !e->stamps) {
+        fail(e, "Android could not reserve Garlic's CPU-side command and argument workspaces.");
+        return -1;
+    }
 
     if (gpu_selftest(e)) return -1;
 
@@ -502,6 +506,12 @@ int engine_init(Engine* e, const char* dir, ProgressFn progress, void* user) {
     e->gu = gpu_alloc(e, 2 * e->inter * 4);
     e->down = gpu_alloc(e, e->hidden * 4);
     e->logits = gpu_alloc(e, (uint64_t)(e->head_idx ? e->t[e->head_idx].rows : e->vocab) * 4);
+    if (!e->x || !e->xn || !e->attn || !e->attn_part || !e->hmlp || !e->bsum ||
+        !e->staging || !e->qkv || !e->lin || !e->o || !e->gu || !e->down ||
+        !e->logits || !e->last || !e->history) {
+        fail(e, "This Vulkan device cannot allocate all required Garlic activation and state buffers.");
+        return -1;
+    }
     if (e->swar) {   // int8 activations for up to PF_ROWS rows of the widest input, and the split-K partial sums
         uint32_t mc = 0, mr = 0;
         for (uint32_t i = 0; i < e->n_tensors; i++)
@@ -777,7 +787,7 @@ static uint64_t args_v(Engine* e, const char* spec, ...) {
     (sizeof(char[sizeof(spec) - 1 == NARGS(__VA_ARGS__) ? 1 : -1]) ? args_v(e, spec, __VA_ARGS__) : 0)
 
 static void dispatch(Engine* e, const GpuKernel* k, uint64_t kargs, uint32_t groups, uint32_t threads) {
-    if (!k || !k->android_handle || !e->android_cl_runtime ||
+    if (!k || !kargs || e->error[0] || !k->android_handle || !e->android_cl_runtime ||
         groups == 0 || threads == 0) {
         fail(e, "Invalid Garlic OpenCL dispatch.");
         return;
