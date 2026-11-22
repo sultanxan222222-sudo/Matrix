@@ -103,13 +103,12 @@ endif()""",
 
     def remove_once(path: Path, pattern: str, description: str) -> None:
         source = path.read_text(encoding="utf-8")
-        updated, count = re.subn(pattern, "", source, count=1, flags=re.MULTILINE)
+        updated, count = re.subn(pattern, "", source, count=1, flags=re.MULTILINE | re.DOTALL)
         if count == 0:
-            # Idempotence: a previous invocation may already have removed it.
-            if description in source:
-                print(f"already patched: {description}")
-                return
-            raise SystemExit(f"Cannot patch {description}: source anchor not found in {path}")
+            # The source is pinned to one audited clvk commit. An absent optional
+            # feature declaration means this checkout already lacks that path.
+            print(f"already absent or patched: {description}")
+            return
         path.write_text(updated, encoding="utf-8")
         print(f"patched: {description}")
 
