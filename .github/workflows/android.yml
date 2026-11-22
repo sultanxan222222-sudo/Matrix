@@ -79,6 +79,29 @@ jobs:
           python3 -m pip install "numpy<2" safetensors huggingface_hub
           python3 -m pip install torch==2.6.0 --index-url https://download.pytorch.org/whl/cpu
           python3 native/garlic_android/build_qwen35_model_pack.py
+          # Verify every generated model-pack file before it enters the APK.
+          python3 - <<'PY'
+          import hashlib
+          import json
+          from pathlib import Path
+          root = Path("build/matrix-qwen35-0.8b")
+          manifest = json.loads((root / "SHA256SUMS.json").read_text())
+          required = {
+              "model.idx", "tokenizer.bin", "qwen3.5-0.8b-q4i.bin",
+              "qwen3.5-0.8b-q4i.json", "QWEN-LICENSE", "MODEL-INFO.txt",
+          }
+          missing = required - manifest.keys()
+          if missing:
+              raise SystemExit(f"Model pack manifest is missing: {sorted(missing)}")
+          for name, entry in manifest.items():
+              file = root / name
+              if not file.is_file():
+                  raise SystemExit(f"Model pack file is missing: {name}")
+              digest = hashlib.sha256(file.read_bytes()).hexdigest()
+              if digest != entry.get("sha256") or file.stat().st_size != entry.get("size"):
+                  raise SystemExit(f"Model pack checksum/size mismatch: {name}")
+          print(f"Verified {len(manifest)} model-pack files.")
+          PY
           mkdir -p app/src/main/assets/garlic
           cp build/matrix-qwen35-0.8b/model.idx app/src/main/assets/garlic/model.idx
           cp build/matrix-qwen35-0.8b/tokenizer.bin app/src/main/assets/garlic/tokenizer.bin
@@ -90,6 +113,8 @@ jobs:
           test -s app/src/main/assets/garlic/model.idx
           test -s app/src/main/assets/garlic/tokenizer.bin
           test -s app/src/main/assets/garlic/qwen3.5-0.8b-q4i.bin
+          test -s app/src/main/assets/garlic/QWEN-LICENSE
+          test -s app/src/main/assets/garlic/SHA256SUMS.json
 
       - name: Build embedded OpenVPN 3 Core for ARM64
         env:
