@@ -117,32 +117,32 @@ endif()""",
     device_cpp = root / "src" / "device.cpp"
     remove_once(
         device_h,
-        r"^\\s*VkPhysicalDeviceShaderFmaFeaturesKHR m_features_shader_fma\\{\\};\\n",
+        r"^\s*VkPhysicalDeviceShaderFmaFeaturesKHR m_features_shader_fma\{\};\n",
         "remove unavailable Shader FMA feature member",
     )
     remove_once(
         device_cpp,
-        r"^\\s*VK_KHR_SHADER_FMA_EXTENSION_NAME,\\n",
+        r"^\s*VK_KHR_SHADER_FMA_EXTENSION_NAME,\n",
         "remove optional Shader FMA extension name",
     )
     remove_once(
         device_cpp,
-        r"^\\s*m_features_shader_fma\\.sType =\\n\\s*VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FMA_FEATURES_KHR;\\n",
+        r"^\s*m_features_shader_fma\.sType =\n\s*VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FMA_FEATURES_KHR;\n",
         "remove unavailable Shader FMA feature initialization",
     )
     remove_once(
         device_cpp,
-        r"^\\s*VER_EXT_FEAT\\(0, VK_KHR_SHADER_FMA_EXTENSION_NAME,\\n\\s*m_features_shader_fma\\),\\n",
+        r"^\s*VER_EXT_FEAT\(0, VK_KHR_SHADER_FMA_EXTENSION_NAME,\n\s*m_features_shader_fma\),\n",
         "omit optional Shader FMA feature query",
     )
     remove_once(
         device_cpp,
-        r"^    std::vector<std::string> spvKhrFMA;\\n.*?^    }\\n",
+        r"^    std::vector<std::string> spvKhrFMA;\n.*?^    }\n",
         "disable optional Shader FMA compiler advertisement",
     )
     remove_once(
         device_cpp,
-        r"^    case spv::CapabilityFMAKHR:\\n        return m_features_shader_fma\\.shaderFmaFloat16 \\|\\n               m_features_shader_fma\\.shaderFmaFloat32 \\|\\n               m_features_shader_fma\\.shaderFmaFloat64;\\n",
+        r"^    case spv::CapabilityFMAKHR:\n        return m_features_shader_fma\.shaderFmaFloat16 \|\n               m_features_shader_fma\.shaderFmaFloat32 \|\n               m_features_shader_fma\.shaderFmaFloat64;\n",
         "treat optional Shader FMA capability as unsupported",
     )
 
