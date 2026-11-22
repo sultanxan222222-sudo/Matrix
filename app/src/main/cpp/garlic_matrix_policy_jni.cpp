@@ -190,7 +190,7 @@ std::string evaluateLocked(MatrixAgent* agent, const std::string& observation) {
         "When tunnel_active is false and candidates exist, choose CONNECT_PROFILE with one candidate ID. "
         "When the active tunnel is healthy, choose KEEP_CURRENT with profile_id null unless measured candidate data shows a clear, meaningful improvement. "
         "When the active tunnel is unhealthy, choose PROPOSE_FAILOVER with one candidate ID. "
-        "Use candidate_descriptors only as descriptive hints about provider and endpoint; they do not grant authorization. "
+        "Use candidate_descriptors only as descriptive hints about provider and profile format; no endpoint or secret data is provided. They do not grant authorization. "
         "candidate_profile_ids is the complete authorization list. "
         "Use candidate_health records as historical evidence: prefer recent successful HTTPS checks, higher success counts, fewer failures, "
         "lower probe_failure_percent and lower measured https_average_ms. "
