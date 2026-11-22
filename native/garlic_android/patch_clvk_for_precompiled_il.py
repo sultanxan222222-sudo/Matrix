@@ -96,36 +96,56 @@ endif()""",
     )
 
 
+    # clvk's optional VK_KHR_shader_fma declarations are newer than the Vulkan
+    # headers shipped in Android NDK 27.2. MATRIX's precompiled kernels do not
+    # require this optional feature, so remove only its optional discovery path.
+    import re
+
+    def remove_once(path: Path, pattern: str, description: str) -> None:
+        source = path.read_text(encoding="utf-8")
+        updated, count = re.subn(pattern, "", source, count=1, flags=re.MULTILINE)
+        if count == 0:
+            # Idempotence: a previous invocation may already have removed it.
+            if description in source:
+                print(f"already patched: {description}")
+                return
+            raise SystemExit(f"Cannot patch {description}: source anchor not found in {path}")
+        path.write_text(updated, encoding="utf-8")
+        print(f"patched: {description}")
 
     device_h = root / "src" / "device.hpp"
     device_cpp = root / "src" / "device.cpp"
-    replace_once(device_h, "    VkPhysicalDeviceShaderFmaFeaturesKHR m_features_shader_fma{};\\n", "", "remove unavailable Shader FMA feature member")
-    replace_once(device_cpp, "    m_features_shader_fma.sType =\\n        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FMA_FEATURES_KHR;\\n", "", "remove unavailable Shader FMA feature initialization")
-    replace_once(device_cpp, "            VER_EXT_FEAT(0, VK_KHR_SHADER_FMA_EXTENSION_NAME,\\n                         m_features_shader_fma),\\n", "", "omit optional Shader FMA extension query")
-    replace_once(device_cpp, """    std::vector<std::string> spvKhrFMA;
-    if (m_features_shader_fma.shaderFmaFloat16 && supports_fp16()) {
-        spvKhrFMA.push_back("16");
-    }
-    if (m_features_shader_fma.shaderFmaFloat32) {
-        spvKhrFMA.push_back("32");
-    }
-    if (m_features_shader_fma.shaderFmaFloat64 && supports_fp64()) {
-        spvKhrFMA.push_back("64");
-    }
-    if (spvKhrFMA.size() > 0) {
-        m_device_compiler_options +=
-            " -spv-khr-fma=" + join(',', spvKhrFMA) + " ";
-    }
-""", "", "disable optional Shader FMA compiler advertisement")
-    replace_once(device_cpp, """    case spv::CapabilityFMAKHR:
-        return m_features_shader_fma.shaderFmaFloat16 ||
-               m_features_shader_fma.shaderFmaFloat32 ||
-               m_features_shader_fma.shaderFmaFloat64;
-""", """    case spv::CapabilityFMAKHR:
-        // Android NDK Vulkan headers used by MATRIX do not expose VK_KHR_shader_fma.
-        // The packaged MATRIX kernels do not require this optional capability.
-        return false;
-""", "treat optional Shader FMA capability as unsupported")
+    remove_once(
+        device_h,
+        r"^\\s*VkPhysicalDeviceShaderFmaFeaturesKHR m_features_shader_fma\\{\\};\\n",
+        "remove unavailable Shader FMA feature member",
+    )
+    remove_once(
+        device_cpp,
+        r"^\\s*VK_KHR_SHADER_FMA_EXTENSION_NAME,\\n",
+        "remove optional Shader FMA extension name",
+    )
+    remove_once(
+        device_cpp,
+        r"^\\s*m_features_shader_fma\\.sType =\\n\\s*VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FMA_FEATURES_KHR;\\n",
+        "remove unavailable Shader FMA feature initialization",
+    )
+    remove_once(
+        device_cpp,
+        r"^\\s*VER_EXT_FEAT\\(0, VK_KHR_SHADER_FMA_EXTENSION_NAME,\\n\\s*m_features_shader_fma\\),\\n",
+        "omit optional Shader FMA feature query",
+    )
+    remove_once(
+        device_cpp,
+        r"^    std::vector<std::string> spvKhrFMA;\\n.*?^    }\\n",
+        "disable optional Shader FMA compiler advertisement",
+    )
+    remove_once(
+        device_cpp,
+        r"^    case spv::CapabilityFMAKHR:\\n        return m_features_shader_fma\\.shaderFmaFloat16 \\|\\n               m_features_shader_fma\\.shaderFmaFloat32 \\|\\n               m_features_shader_fma\\.shaderFmaFloat64;\\n",
+        "treat optional Shader FMA capability as unsupported",
+    )
+
 
 
 if __name__ == "__main__":
