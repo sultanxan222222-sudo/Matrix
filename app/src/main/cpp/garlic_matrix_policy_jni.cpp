@@ -16,10 +16,12 @@
 #include <array>
 #include <atomic>
 #include <cstdint>
+#include <cerrno>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <mutex>
+#include <new>
 #include <string>
 #include <vector>
 
