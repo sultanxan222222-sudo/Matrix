@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <path android:fillColor="#07172B" android:pathData="M0,0h108v108h-108z"/>
+    <path android:fillColor="#102B49" android:pathData="M0,0h108v108h-108z" android:fillAlpha="0.35"/>
+    <!-- MATRIX wordmark -->
+    <path android:fillColor="#168BFF" android:pathData="M9,7h5l4,7 4,-7h5v13h-4v-7l-5,7 -5,-7v7h-4z M30,7h5l4,13h-4l-1,-3h-4l-1,3h-4z M33,11l-1,3h2z M41,7h12v3h-4v10h-4v-10h-4z M55,7h8c4,0 6,2 6,5 0,2 -1,4 -3,5l4,3h-5l-3,-3h-3v3h-4z M59,10v4h4c1,0 2,-1 2,-2s-1,-2 -2,-2z M72,7h4v13h-4z M78,7h5l3,5 3,-5h5l-6,8v5h-4v-5z" />
+    <!-- cracked concrete wall -->
+    <path android:fillColor="#777F89" android:pathData="M7,31l94,0v48l-94,0z"/>
+    <path android:fillColor="#AAB1B8" android:pathData="M7,31l94,0 -5,7 -15,2 -8,-4 -13,5 -13,-4 -13,5 -16,-4 -12,3z"/>
+    <path android:fillColor="#555E69" android:pathData="M7,72l16,-5 12,4 14,-5 13,5 12,-4 13,5 14,-4v11h-94z"/>
+    <path android:strokeColor="#303B49" android:strokeWidth="1.7" android:fillColor="#00000000" android:pathData="M7,31l14,9 -4,9 10,7 -5,10 9,13 M101,31l-13,8 5,10 -10,7 5,10 -10,13 M35,31l-3,10 8,7 -6,8 8,7 -5,9 M70,31l4,10 -7,8 8,8 -5,8 7,10"/>
+    <!-- orange impact flames -->
+    <path android:fillColor="#FF7A18" android:pathData="M42,59c-7,-8 2,-12 1,-20 8,7 8,11 7,16 4,-5 5,-9 4,-14 10,9 9,18 4,25z"/>
+    <path android:fillColor="#FFC247" android:pathData="M48,63c-3,-5 2,-8 2,-13 5,5 6,9 2,15z"/>
+    <path android:fillColor="#FF7A18" android:pathData="M62,59c7,-8 -2,-12 -1,-20 -8,7 -8,11 -7,16 -4,-5 -5,-9 -4,-14 -10,9 -9,18 -4,25z"/>
+    <path android:fillColor="#FFD05A" android:pathData="M56,63c3,-5 -2,-8 -2,-13 -5,5 -6,9 -2,15z"/>
+    <!-- Animated punch group; the launcher uses its neutral position. -->
+    <group android:name="fist" android:pivotX="53" android:pivotY="52">
+        <path android:fillColor="#E9B58F" android:strokeColor="#623F37" android:strokeWidth="1.8" android:pathData="M36,54c-2,-3 -1,-7 2,-9l3,-2c0,-5 3,-8 7,-8 2,-4 7,-5 10,-2 4,-2 8,1 8,5 4,1 6,5 4,9l-3,8c-1,5 -5,8 -10,8h-12c-5,0 -8,-4 -9,-9z"/>
+        <path android:fillColor="#F5C7A4" android:pathData="M42,43c1,-4 5,-5 8,-3l4,3 -2,6 -10,1z M52,39c1,-4 5,-5 8,-2l3,4 -3,6 -9,-1z M61,41c2,-3 6,-3 8,0l1,5 -4,5 -7,-3z"/>
+        <path android:strokeColor="#8C5D4E" android:strokeWidth="1.3" android:fillColor="#00000000" android:pathData="M39,51l7,2 6,-2 7,2 7,-2 M43,58l7,2 7,-1"/>
+    </group>
+    <!-- shattered debris -->
+    <path android:fillColor="#D1D5D9" android:pathData="M26,47l7,-4 -2,9z M78,45l7,4 -8,3z M24,69l8,-3 -4,9z M78,69l8,-3 -3,9z"/>
+    <!-- VPN wordmark -->
+    <path android:fillColor="#168BFF" android:pathData="M23,86h5l4,12 4,-12h5l-7,16h-4z M44,86h9c4,0 6,2 6,6s-2,6 -6,6h-4v4h-5z M49,90v4h4c1,0 2,-1 2,-2s-1,-2 -2,-2z M63,86h5l7,9v-9h5v16h-5l-7,-9v9h-5z"/>
+    <path android:fillColor="#168BFF" android:pathData="M12,104h84v1h-84z"/>
+</vector>

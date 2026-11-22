@@ -1,44 +1,60 @@
-# MATRIX VPN
+# MATRIX VPN — Hybrid 0.8.1
 
-Adaptive Android VPN project focused on resilient connections, Cloudflare WARP profile import, and transparent diagnostics.
+MATRIX is an Android VPN client with separate WARP and VPN modes, an encrypted profile pool, AmneziaWG/WireGuard support, an embedded OpenVPN 3 Core engine, relay selection, and guarded recovery between saved VPN profiles.
 
-## Current status
+## Included in 0.8.1
 
-The Android app includes:
-- Import and in-memory parsing of standard WireGuard and AmneziaWG profiles, from clipboard or Android file picker.
-- An embedded AmneziaWG-capable Android tunnel library (com.zaneschepke:amneziawg-android:2.3.7), intended to support the AWG extensions emitted by WARP configuration generators.
-- A user-authorized VPN connect/disconnect flow.
-- Default Android network monitoring and an external HTTPS connectivity probe after tunnel startup.
-- Live free-server directory from VPN Gate. Selecting a relay exports its OpenVPN profile to a compatible external OpenVPN app; MATRIX's built-in tunnel still does not connect OpenVPN profiles directly.
-- Unit tests and GitHub Actions build/test workflow, configured to publish a debug APK as a downloadable artifact.
+- WARP-compatible profile generation through a third-party community service and connection through AmneziaWG.
+- Import and connection for WireGuard and AmneziaWG profiles.
+- Embedded OpenVPN 3 Core through a Rust/JNI bridge and Android VpnService; VPN Gate profiles connect inside MATRIX rather than launching another VPN app.
+- AES-GCM profile encryption with an Android Keystore key.
+- Public VPN Gate discovery, CSV/profile validation, duplicate filtering, directory ranking, and a bounded TCP endpoint preflight on the physical network.
+- One-tap VPN Gate candidate preparation and sequential connection attempts. If the volunteer queue fails, saved WARP/WireGuard profiles are eligible as fallback candidates.
+- Strict mutual exclusion between the WARP and ordinary VPN modes: before any new connection, MATRIX stops and verifies both embedded engines so only one can own Android's VPN interface.
+- Recovery stays inside the selected mode: WARP can fall back only to saved WARP profiles; ordinary VPN can fall back only to non-WARP profiles. VPN Gate relay recovery never silently changes into WARP.
+- Cross-engine recovery between OpenVPN 3 and WireGuard/AmneziaWG after repeated connection-check failures, only when Android Always-on VPN and Block connections without VPN are confirmed.
+- Periodic HTTPS reachability and latency checks while the MATRIX process remains alive with an active VPN service; three consecutive failed checks are required before automatic recovery.
+- Optional HTTP CONNECT proxy configuration for TCP-capable OpenVPN profiles. MATRIX creates a separate encrypted copy and preserves the original profile.
+- Compact translucent glass controls, a decorative rotating Matrix globe, and a gold RX/TX display based on MATRIX app-UID traffic counters.
 
-The current app version is 0.5.1. The build toolchain uses Android Gradle Plugin 8.10.1, Kotlin 2.2.21, Gradle 8.11.1, and Android SDK 36. A successful CI build confirms compilation and unit tests, not a real Cloudflare WARP handshake. Real-device tests are still required to confirm each generated profile mode (Legacy, AWG 2.0, AWG 3.0 and AWG 3.1), routing, DNS, and endpoint reachability.
+## Transport and security boundaries
 
-## Security notes
+- OpenVPN profiles can use their configured TCP or UDP transport. The optional HTTP CONNECT proxy is for TCP profiles only, requires a user-provided trusted proxy, and does not itself provide obfs4, Snowflake, WebTunnel, or guaranteed DPI evasion. Those transports require compatible remote server infrastructure and are not claimed by this client.
+- WARP profiles come from a third-party generator, not an official Cloudflare client/API. Creating a profile does not prove a successful WARP handshake.
+- VPN Gate nodes are independent volunteer-operated computers. Their operators are not MATRIX; treat them as untrusted exits and do not use them for sensitive activity.
+- The globe animation is decorative only. It does not display the user's location, network geography, or a live VPN route.
+- RX/TX values are Android traffic counters for the MATRIX app UID. They are not whole-device rates and are not a verified VPN tunnel throughput measurement.
+- HTTPS reachability is a practical connectivity signal, not a cryptographic peer-handshake measurement or proof of anonymity.
+- Automatic tunnel switching is sequential, not seamless multipath. It is disabled unless Android lockdown is confirmed, to avoid intentionally falling back to an unprotected direct route.
+- Android background execution and Doze can still affect timing. The monitor runs while the app process is retained by the active VPN service, but this is not a guarantee against OS process termination or OEM battery policies.
 
-- Profile text is kept in memory by the current import flow and is not saved by MATRIX.
-- A server address alone is only a candidate hint; it does not contain the keys or settings needed to authenticate a tunnel.
-- Use only VPN profiles and servers you are authorized to use.
-- MATRIX does not disable certificate checks or implement custom cryptography.
-- The adaptive recovery policy remains a prototype. Automatic failover between independently configured, authenticated VPN endpoints is not implemented yet.
+## Build and validation
 
-## Architecture
+CI builds the ARM64 OpenVPN 3 native library, runs JVM unit tests, assembles the debug APK, verifies the native library is packaged, and uploads the APK and source bundle. This is build validation, not a substitute for a physical-device acceptance run.
 
-- Network watcher: observe Android connectivity and Android's validated-internet signal.
-- Profile inspection: identify WireGuard, AmneziaWG and OpenVPN profile formats without logging secret contents.
-- Tunnel backend: embedded AmneziaWG Android library, intended to run both ordinary WireGuard and AWG profiles.
-- Connectivity probe: test external HTTPS after tunnel startup; this does not independently prove a WireGuard peer handshake.
-- Parallel recovery: planned diagnostics of the current path while independently probing configured alternatives.
-- Security core: keep key handling separate from decision logic.
+Before calling a release production-ready, install on the target phone and test both engines, Android VPN consent, screen-off/background monitoring, reconnects, mode switching, DNS and IPv6 leak behavior, lockdown, captive portals, Wi-Fi/mobile handover, and long-duration stability. The current CI cannot certify those device-specific behaviors.
 
-## Build
+## Build environment
 
-Open in Android Studio with JDK 17 and Android SDK 36. GitHub Actions runs gradle testDebugUnitTest assembleDebug and uploads app/build/outputs/apk/debug/app-debug.apk as the matrix-vpn-debug-apk artifact for 14 days after a successful run.
+JDK 17, Android SDK 36, Android NDK 27.2, Gradle 8.13. App minSdk 26, targetSdk 35. The generated workflow APK is a debug build for ARM64 devices. The 0.8.1 build includes exclusive engine handover and persisted WireGuard backend state across Activity recreation.
 
-## Roadmap
+## MATRIX AI — Garlic Qwen3.5
 
-1. Validate generated WARP profiles on a real Android device.
-2. Integrate a native OpenVPN engine if direct VPN Gate connections inside MATRIX are required.
-3. Add a secure multi-profile store and independent endpoint probes.
-4. Implement tested failover between fully configured, authenticated profiles.
-5. Validate reconnects, network handover, DNS behavior, traffic-leak protection, and battery use on the device.
+The `feature/matrix-ai-core` line integrates Garlic LLM with the Qwen3.5-0.8B Q4i model as an internal, on-device network-policy engine. It is not a chatbot and does not expose chat, voice, Python, PS4, or remote inference services.
+
+- The Android ARM64 native engine is adapted to OpenCL-on-Vulkan through clvk. The original Garlic inference/tokenizer path is retained and the Android build produces the model pack and SPIR-V kernels.
+- The model receives only aggregate health observations, measured HTTPS latency/history, and opaque IDs for a bounded set of saved MATRIX profiles. VPN configuration text, private keys, credentials, raw IP endpoints, DNS contents, and browsing data are not sent to the model.
+- The model can recommend only a profile ID already supplied by the host. A strict JSON output gate validates the action, confidence, reason code, tunnel state, and candidate allowlist. Invalid or low-confidence output is discarded.
+- MATRIX, not the model, owns VPN permissions, tunnel lifecycle, profile parsing, sequential engine handover, and Android lockdown checks.
+- A generation-based emergency-stop latch invalidates delayed inference, probe, recovery, and Android VPN-consent callbacks. The model cannot disable lockdown or the emergency stop.
+- Model weights and runtime assets are built into the CI APK. On first launch the native loader copies the verified assets to app-private storage and performs a real GPU token-pass smoke test before advertising Garlic as ready.
+
+### AI validation status
+
+A successful Gradle build is not proof of useful model decisions or safe VPN operation. Release acceptance still requires: successful ARM64 native compilation and packaged-library checks; deterministic policy-gate and emergency-stop tests; numerical/inference smoke tests on the target device; repeated candidate-selection and failover trials; Android Always-on VPN + Block connections without VPN verification; DNS/IPv6 leak tests; and long-running/background/Doze testing on the Realme Note 50.
+
+The mobile Garlic port deliberately disables unsupported acceleration/layout paths (including SWAR/Q4S/Q3S, TurboQuant and speculative decoding) until their Android kernels pass numerical reference tests. If the device cannot provide the required Vulkan/OpenCL GPU or safe memory headroom, MATRIX AI must report unavailable and leave manual VPN operation intact.
+
+### Licensing
+
+Retain Garlic LLM's GPL-3.0-or-later notices and the Qwen3.5 model license/attribution files in every distributable source/model package. The model's license terms must be reviewed separately from the engine's GPL license.

@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<objectAnimator xmlns:android="http://schemas.android.com/apk/res/android"
+    android:duration="1100"
+    android:interpolator="@android:interpolator/linear"
+    android:repeatCount="infinite"
+    android:repeatMode="restart">
+    <propertyValuesHolder
+        android:propertyName="translateX"
+        android:valueType="floatType">
+        <!-- Hold retracted, punch forward, pause at impact, recoil, then wait. -->
+        <keyframe android:fraction="0.0" android:value="-7.0" />
+        <keyframe android:fraction="0.18" android:value="-7.0" />
+        <keyframe android:fraction="0.30" android:value="0.0" />
+        <keyframe android:fraction="0.36" android:value="0.0" />
+        <keyframe android:fraction="0.52" android:value="-7.0" />
+        <keyframe android:fraction="1.0" android:value="-7.0" />
+    </propertyValuesHolder>
+    <propertyValuesHolder
+        android:propertyName="translateY"
+        android:valueType="floatType">
+        <keyframe android:fraction="0.0" android:value="0.0" />
+        <keyframe android:fraction="0.28" android:value="0.0" />
+        <keyframe android:fraction="0.31" android:value="1.8" />
+        <keyframe android:fraction="0.40" android:value="0.0" />
+        <keyframe android:fraction="1.0" android:value="0.0" />
+    </propertyValuesHolder>
+</objectAnimator>
