@@ -136,12 +136,12 @@ endif()""",
     )
     remove_once(
         device_cpp,
-        r"^    std::vector<std::string> spvKhrFMA;\n.*?^    }\n",
+        r"^    std::vector<std::string> spvKhrFMA;\n.*?^    // Types support",
         "disable optional Shader FMA compiler advertisement",
     )
     remove_once(
         device_cpp,
-        r"^    case spv::CapabilityFMAKHR:\n        return m_features_shader_fma\.shaderFmaFloat16 \|\n               m_features_shader_fma\.shaderFmaFloat32 \|\n               m_features_shader_fma\.shaderFmaFloat64;\n",
+        r"^    case spv::CapabilityFMAKHR:\n        return m_features_shader_fma\.shaderFmaFloat16 \|\|\n               m_features_shader_fma\.shaderFmaFloat32 \|\|\n               m_features_shader_fma\.shaderFmaFloat64;\n",
         "treat optional Shader FMA capability as unsupported",
     )
 
