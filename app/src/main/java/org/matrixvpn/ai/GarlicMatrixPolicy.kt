@@ -37,8 +37,9 @@ class GarlicMatrixPolicy(
             "Для распаковки встроенной модели Garlic нужно не менее 600 МиБ свободного места."
         }
 
-        // The native library loads the model from app-private storage. The Qwen weights
-        // and model.idx must first be installed there using a separately verified model pack.
+        // The APK contains the model index, tokenizer, Qwen weights and compiled Garlic
+        // SPIR-V module. JNI installs those packaged assets into app-private storage and
+        // performs a real Qwen token-pass smoke test before returning a non-zero handle.
         System.loadLibrary("OpenCL")
         System.loadLibrary("matrix_garlic")
         val handle = nativeCreate(appContext.assets, modelDirectory.absolutePath)
