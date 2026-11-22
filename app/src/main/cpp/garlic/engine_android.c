@@ -5,14 +5,11 @@
  * Android changes: replace PS4 GNM/PM4 and direct-memory calls with clvk OpenCL
  * buffers, kernels, queue dispatch and explicit host/device copies.
  */
-// Qwen3 / Qwen3.5 inference on the PS4 GPU from a native app (the same command packets as pc/gpu.py).
-//
-// One block of Garlic memory (CPU write-combined, GPU read/write) holds everything the GPU touches. Each run builds
-// a command buffer: Sony's default state, then for every token ~400 compute dispatches (embed, per layer: norm,
-// q/k/v, q/k norm + RoPE + cache, attention, o, add, norm, gate/up, SiLU x up, down, add; final norm, logits,
-// sample), each followed by CS_PARTIAL_FLUSH and an ACQUIRE_MEM that drops stale L1 / scalar cache lines; then an
-// end-of-pipe event writes a label the CPU polls. Kernels come from assets/kernels.bin (shaders/qwen3.cl or,
-// for Qwen3.5, shaders/qwen35.cl, whose DeltaNet layers replace attention by conv + delta rule).
+// Android Qwen3.5 inference path. The original Garlic engine's model layout, tensor
+// scheduling and decode logic are retained, while GPU allocation, dispatch, synchronization
+// and host/device transfers are implemented through the MATRIX clvk OpenCL adapter.
+// The Android build uses the compiled garlic/qwen35.spv module and app-private Q4i model
+// assets; it does not submit PS4 GNM/PM4 command packets or access PS4 GPU memory.
 
 #include "engine.h"
 
