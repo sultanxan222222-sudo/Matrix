@@ -32,6 +32,8 @@ MATRIX is an Android VPN client with separate WARP and VPN modes, an encrypted p
 
 CI builds the ARM64 OpenVPN 3 native library, runs JVM unit tests, assembles the debug APK, verifies the native library is packaged, and uploads the APK and source bundle. This is build validation, not a substitute for a physical-device acceptance run.
 
+For the full-AI branch, CI additionally builds the Garlic Android ARM64 runtime, converts the Qwen3.5-0.8B checkpoint into the native Q4i model pack, verifies every generated model-pack file against its SHA-256 and byte-size manifest, checks required model/license assets, packages the model and native libraries into the APK, and verifies the expected APK entries before uploading artifacts.
+
 Before calling a release production-ready, install on the target phone and test both engines, Android VPN consent, screen-off/background monitoring, reconnects, mode switching, DNS and IPv6 leak behavior, lockdown, captive portals, Wi-Fi/mobile handover, and long-duration stability. The current CI cannot certify those device-specific behaviors.
 
 ## Build environment
