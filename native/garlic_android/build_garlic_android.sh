@@ -30,11 +30,17 @@ mkdir -p "$THIRD_PARTY" \
   "$ROOT/app/src/main/assets/garlic" \
   "$ROOT/app/src/main/jniLibs/$ANDROID_ABI"
 
+# Pin clvk to the exact upstream revision whose source anchors are verified by
+# patch_clvk_for_precompiled_il.py. This keeps the native runtime reproducible.
+CLVK_COMMIT="d73cb4bd452f1f1f0aefb953a813349d3c5f18e5"
 if [[ ! -d "$CLVK_DIR/.git" ]]; then
-  git clone --depth 1 --recurse-submodules https://github.com/kpet/clvk.git "$CLVK_DIR"
-else
-  git -C "$CLVK_DIR" submodule update --init --recursive
+  git init "$CLVK_DIR"
+  git -C "$CLVK_DIR" remote add origin https://github.com/kpet/clvk.git
 fi
+git -C "$CLVK_DIR" fetch --depth 1 origin "$CLVK_COMMIT"
+git -C "$CLVK_DIR" checkout --detach "$CLVK_COMMIT"
+git -C "$CLVK_DIR" submodule sync --recursive
+git -C "$CLVK_DIR" submodule update --init --recursive --depth 1
 
 # MATRIX uses precompiled SPIR-V produced by host clspv. Patch clvk so its Android
 # runtime accepts that IL directly instead of needing LLVM/clspv executables on-device.
