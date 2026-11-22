@@ -10,11 +10,12 @@ import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
- * Loads the Android OpenCL-on-Vulkan runtime and runs a small SPIR-V compute test.
+ * Optional diagnostic for the Android OpenCL-on-Vulkan runtime.
  *
- * This verifies the Android replacement for Garlic's PS4 GPU dispatch layer. It is
- * intentionally not labelled as a completed Qwen inference engine: the full Garlic
- * allocator/dispatch/model loader still has to be ported on top of this backend.
+ * This class checks the clvk device path and a small SPIR-V kernel. It is not the
+ * MATRIX AI readiness check: GarlicMatrixPolicy loads the bundled Qwen3.5 weights,
+ * initializes the Garlic engine and performs a real model token-pass before it reports
+ * the policy engine as ready.
  */
 class GarlicAndroidBackend : Closeable {
     private val executor: ExecutorService = Executors.newSingleThreadExecutor { task ->
