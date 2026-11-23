@@ -33,6 +33,7 @@ def main() -> None:
     root = Path(sys.argv[1]).resolve()
     cmake = root / "src" / "CMakeLists.txt"
     program = root / "src" / "program.cpp"
+    device_cpp = root / "src" / "device.cpp"
     if not cmake.is_file() or not program.is_file():
         raise SystemExit(f"Not a clvk checkout: {root}")
 
