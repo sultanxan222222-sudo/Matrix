@@ -68,6 +68,14 @@ jobs:
 
       # Build the official Qwen3.5 checkpoint into Garlic's native Q4i format
       # and bundle the complete model into this single APK.
+      # Pin a Python ABI with published CPU wheels. The ubuntu-latest image
+      # moved to a newer system Python, for which the old torch 2.6.0 wheel
+      # is unavailable from the CPU index.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
       - name: Build and bundle Garlic Qwen3.5 model weights
         env:
           MATRIX_QWEN_MODEL: Qwen/Qwen3.5-0.8B
@@ -75,10 +83,10 @@ jobs:
           MATRIX_MODEL_WORK: ${{ runner.temp }}/qwen35-work
         run: |
           set -euxo pipefail
-          python3 -m pip install --upgrade pip
-          python3 -m pip install "numpy<2" safetensors huggingface_hub
-          python3 -m pip install torch==2.6.0 --index-url https://download.pytorch.org/whl/cpu
-          python3 native/garlic_android/build_qwen35_model_pack.py
+          python -m pip install --upgrade pip
+          python -m pip install "numpy<2" safetensors huggingface_hub
+          python -m pip install "torch==2.9.1+cpu" --index-url https://download.pytorch.org/whl/cpu
+          python native/garlic_android/build_qwen35_model_pack.py
           # Verify every generated model-pack file before it enters the APK.
           python3 - <<'PY'
           import hashlib
