@@ -96,6 +96,44 @@ endif()""",
     )
 
 
+    # Android's NDK Vulkan stub does not promise every Vulkan 1.1 device
+    # command as a link-time symbol on older platform API levels. Resolve the
+    # features query through the loader, retaining the KHR path for Vulkan 1.0.
+    replace_once(
+        device_cpp,
+        """    if (m_properties.apiVersion < VK_MAKE_VERSION(1, 1, 0)) {
+        // Use the extension on Vulkan 1.0 platforms
+        auto func = reinterpret_cast<PFN_vkGetPhysicalDeviceFeatures2KHR>(
+            vkGetInstanceProcAddr(instance, "vkGetPhysicalDeviceFeatures2KHR"));
+        if (!func) {
+            cvk_fatal(
+                "Failed to get pointer to vkGetPhysicalDeviceFeatures2KHR()");
+        }
+        func(m_pdev, &supported_features);
+    } else {
+        vkGetPhysicalDeviceFeatures2(m_pdev, &supported_features);
+    }""",
+        """    // Resolve through the Android Vulkan loader instead of creating a
+    // direct ELF dependency on a Vulkan 1.1 symbol that may not be exported
+    // by the NDK stub for the app's minimum Android API level.
+    auto features2_name =
+        m_properties.apiVersion >= VK_MAKE_VERSION(1, 1, 0)
+            ? "vkGetPhysicalDeviceFeatures2"
+            : "vkGetPhysicalDeviceFeatures2KHR";
+    auto func = reinterpret_cast<PFN_vkGetPhysicalDeviceFeatures2>(
+        vkGetInstanceProcAddr(instance, features2_name));
+    if (!func && m_properties.apiVersion >= VK_MAKE_VERSION(1, 1, 0)) {
+        func = reinterpret_cast<PFN_vkGetPhysicalDeviceFeatures2>(
+            vkGetInstanceProcAddr(instance, "vkGetPhysicalDeviceFeatures2KHR"));
+    }
+    if (!func) {
+        cvk_fatal("Failed to resolve vkGetPhysicalDeviceFeatures2[KHR]()");
+    }
+    func(m_pdev, &supported_features);""",
+        "resolve Vulkan 1.1 features query through the Android Vulkan loader",
+    )
+
+
     # clvk's optional VK_KHR_shader_fma declarations are newer than the Vulkan
     # headers shipped in Android NDK 27.2. MATRIX's precompiled kernels do not
     # require this optional feature, so remove only its optional discovery path.
