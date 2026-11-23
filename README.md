@@ -32,8 +32,31 @@ MATRIX is an Android VPN client with separate WARP and VPN modes, an encrypted p
 
 CI builds the ARM64 OpenVPN 3 native library, runs JVM unit tests, assembles the debug APK, verifies the native library is packaged, and uploads the APK and source bundle. This is build validation, not a substitute for a physical-device acceptance run.
 
+For the full-AI branch, CI additionally builds the Garlic Android ARM64 runtime, converts the Qwen3.5-0.8B checkpoint into the native Q4i model pack, verifies every generated model-pack file against its SHA-256 and byte-size manifest, checks required model/license assets, packages the model and native libraries into the APK, and verifies the expected APK entries before uploading artifacts.
+
 Before calling a release production-ready, install on the target phone and test both engines, Android VPN consent, screen-off/background monitoring, reconnects, mode switching, DNS and IPv6 leak behavior, lockdown, captive portals, Wi-Fi/mobile handover, and long-duration stability. The current CI cannot certify those device-specific behaviors.
 
 ## Build environment
 
 JDK 17, Android SDK 36, Android NDK 27.2, Gradle 8.13. App minSdk 26, targetSdk 35. The generated workflow APK is a debug build for ARM64 devices. The 0.8.1 build includes exclusive engine handover and persisted WireGuard backend state across Activity recreation.
+
+## MATRIX AI — Garlic Qwen3.5
+
+The `feature/matrix-ai-core` line integrates Garlic LLM with the Qwen3.5-0.8B Q4i model as an internal, on-device network-policy engine. It is not a chatbot and does not expose chat, voice, Python, PS4, or remote inference services.
+
+- The Android ARM64 native engine is adapted to OpenCL-on-Vulkan through clvk. The original Garlic inference/tokenizer path is retained and the Android build produces the model pack and SPIR-V kernels.
+- The model receives only aggregate health observations, measured HTTPS latency/history, and opaque IDs for a bounded set of saved MATRIX profiles. VPN configuration text, private keys, credentials, raw IP endpoints, DNS contents, and browsing data are not sent to the model.
+- The model can recommend only a profile ID already supplied by the host. A strict JSON output gate validates the action, confidence, reason code, tunnel state, and candidate allowlist. Invalid or low-confidence output is discarded.
+- MATRIX, not the model, owns VPN permissions, tunnel lifecycle, profile parsing, sequential engine handover, and Android lockdown checks.
+- A generation-based emergency-stop latch invalidates delayed inference, probe, recovery, and Android VPN-consent callbacks. The model cannot disable lockdown or the emergency stop.
+- Model weights and runtime assets are built into the CI APK. On first launch the native loader copies the verified assets to app-private storage and performs a real GPU token-pass smoke test before advertising Garlic as ready.
+
+### AI validation status
+
+A successful Gradle build is not proof of useful model decisions or safe VPN operation. Release acceptance still requires: successful ARM64 native compilation and packaged-library checks; deterministic policy-gate and emergency-stop tests; numerical/inference smoke tests on the target device; repeated candidate-selection and failover trials; Android Always-on VPN + Block connections without VPN verification; DNS/IPv6 leak tests; and long-running/background/Doze testing on the Realme Note 50.
+
+The mobile Garlic port deliberately disables unsupported acceleration/layout paths (including SWAR/Q4S/Q3S, TurboQuant and speculative decoding) until their Android kernels pass numerical reference tests. If the device cannot provide the required Vulkan/OpenCL GPU or safe memory headroom, MATRIX AI must report unavailable and leave manual VPN operation intact.
+
+### Licensing
+
+Retain Garlic LLM's GPL-3.0-or-later notices and the Qwen3.5 model license/attribution files in every distributable source/model package. The model's license terms must be reviewed separately from the engine's GPL license.
